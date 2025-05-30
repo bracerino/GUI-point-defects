@@ -1,0 +1,15 @@
+streamlit
+numpy
+matplotlib
+ase
+matminer
+pymatgen
+py3Dmol
+plotly
+streamlit-plotly-events
+setuptools
+mp-api==0.45.3
+aflow
+pillow
+pymatgen.analysis.defects
+psutil
