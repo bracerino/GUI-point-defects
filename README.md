@@ -18,16 +18,16 @@ Open your terminal console and write the following commands (the bold text):
       **sudo apt install git**    
       
 1) Download the XRDlicious code from GitHub (or download it manually without Git on the following link by clicking on 'Code' and 'Download ZIP', then extract the ZIP. With Git, it is automatically extracted):  
-      **git clone https://github.com/bracerino/xrdlicious.git**
+      **git clone https://github.com/bracerino/GUI-point-defects.git**
 
 2) Navigate to the downloaded project folder:  
-      **cd xrdlicious/**
+      **cd GUI-point-defects/**
 
 3) Create a Python virtual environment to prevent possible conflicts between packages:  
-      **python3 -m venv xrdlicious_env**
+      **python3 -m venv point_defects_env**
 
 4) Activate the Python virtual environment (before activating, make sure you are inside the xrdlicious folder):  
-      **source xrdlicious_env/bin/activate**
+      **source point_defects_env/bin/activate**
    
 5) Install all the necessary Python packages:  
       **pip install -r requirements.txt**
