@@ -12,7 +12,7 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-from helpers import *
+from helpers_defects import *
 
 import numpy as np
 import matplotlib.pyplot as plt
