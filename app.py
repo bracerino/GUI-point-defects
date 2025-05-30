@@ -12,7 +12,7 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-from helpers_defects import *
+from helpers import *
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -346,7 +346,7 @@ if calc_mode == "**🔬 Structure Visualization**":
             #    mp_struct = st.session_state["original_structure"].copy()
             show_3d_visualization = st.checkbox("Show 3D Structure Visualization", value=True,
                                                 help="Toggle to show/hide the interactive 3D structure viewer")
-            apply_symmetry_ops = st.checkbox("🔁 Apply symmetry-based standardization", value=False)
+            apply_symmetry_ops = st.checkbox("🔁 Apply symmetry-based standardization", value=True, disabled = True)
             show_atomic = st.checkbox("Show atomic positions (labels on structure and list in table)", value=False)
             if mp_struct:
                 if apply_symmetry_ops:
