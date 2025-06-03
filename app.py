@@ -1848,7 +1848,7 @@ if st.session_state.uploaded_files:
                     int_c1, int_c2, int_c3 = st.columns(3)
                     int_el_fast = int_c1.text_input("Element", "N", key="int_el_fast")
                     int_n_fast = int_c2.number_input("# Insert", 1, key="int_n_fast")
-                    int_mode_fast = int_c3.selectbox("Mode", ["moderate"], 0,
+                    int_mode_fast = int_c3.selectbox("Mode", ["random"], 0,
                                                      key="int_mode_fast")
                     int_c4, int_c5, int_c6 = st.columns(3)
                     int_min_dist_fast = int_c4.number_input("Min Distance from atoms (Å)", 1.5, step=0.1, format="%.1f",
