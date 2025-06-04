@@ -8,6 +8,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from ase.io import read, write
 from matminer.featurizers.structure import PartialRadialDistributionFunction
+import numpy as np
+from ase.io import write
+from pymatgen.io.ase import AseAtomsAdaptor
+import streamlit.components.v1 as components
+import py3Dmol
+from io import StringIO
+import pandas as pd
+import os
+from pymatgen.io.cif import CifWriter
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+import io
+from pymatgen.core import Structure, Element
+from PIL import Image
+from pymatgen.transformations.standard_transformations import SupercellTransformation
+
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.analysis.diffraction.xrd import XRDCalculator
 from pymatgen.analysis.diffraction.neutron import NDCalculator
@@ -38,6 +53,23 @@ from PIL import Image
 
 # import aflow.keywords as K
 from pymatgen.io.cif import CifWriter
+
+
+MP_API_KEY = "UtfGa1BUI3RlWYVwfpMco2jVt8ApHOye"
+ELEMENTS = [
+    'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+    'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca',
+    'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+    'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr',
+    'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn',
+    'Sb', 'Te', 'I', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd',
+    'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb',
+    'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
+    'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Th',
+    'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm',
+    'Md', 'No', 'Lr', 'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds',
+    'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 'Lv', 'Ts', 'Og'
+]
 
 
 def get_formula_type(formula):
@@ -1280,3 +1312,2063 @@ def show_xrdlicious_roadmap():
 #### Basic Peak Fitting (Experimental Data)
 * ⏳ Fitting: Advanced goal for fitting profiles or full patterns to refine parameters.
 """)
+
+def get_space_group_info(number):
+    symbol = SPACE_GROUP_SYMBOLS.get(number, f"SG#{number}")
+    return symbol
+
+def classify_interstitial_site(structure, frac_coords, dummy_element="H"):
+    from pymatgen.analysis.local_env import CrystalNN
+    temp_struct = structure.copy()
+    temp_struct.append(dummy_element, frac_coords, coords_are_cartesian=False)
+    cnn = CrystalNN()
+    try:
+        nn_info = cnn.get_nn_info(temp_struct, len(temp_struct) - 1)
+    except Exception as e:
+        st.write("CrystalNN error:", e)
+        nn_info = []
+    cn = len(nn_info)
+
+    if cn == 4:
+        return f"CN = {cn} **(Tetrahedral)**"
+    elif cn == 6:
+        return f"CN = {cn} **(Octahedral)**"
+    elif cn == 3:
+        return f"CN = {cn} (Trigonal Planar)"
+    elif cn == 5:
+        return f"CN = {cn} (Trigonal Bipyramidal)"
+    else:
+        return f"CN = {cn}"
+
+
+def wrap_coordinates(frac_coords):
+    return np.array(frac_coords) % 1
+
+
+def compute_periodic_distance_matrix(frac_coords):
+    n = len(frac_coords)
+    dist_matrix = np.zeros((n, n))
+    if n > 1:
+        for i in range(n):
+            for j in range(i + 1, n):
+                delta = frac_coords[i] - frac_coords[j]
+                delta = delta - np.round(delta)
+                dist = np.linalg.norm(delta)
+                dist_matrix[i, j] = dist_matrix[j, i] = dist
+    return dist_matrix
+
+
+def select_spaced_points_original(frac_coords_list, n_points, mode, target_value=0.5, random_seed=None):
+    if not frac_coords_list or n_points == 0:
+        return [], []
+
+    if random_seed is not None:
+        import random
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    frac_coords_array = np.array(frac_coords_list)
+    n_available = len(frac_coords_list)
+
+    if n_available <= n_points:
+        selected_indices = list(range(n_available))
+        selected_coords_out = frac_coords_list.copy()
+        return selected_coords_out, selected_indices
+
+    if mode == "farthest":
+        dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
+        selected_indices = []
+
+        # Randomize starting point
+        if random_seed is not None:
+            import random
+            start_idx = random.randint(0, n_available - 1)
+        else:
+            start_idx = 0
+        selected_indices.append(start_idx)
+
+        for _ in range(n_points - 1):
+            remaining_indices = [i for i in range(n_available) if i not in selected_indices]
+            if not remaining_indices:
+                break
+
+            best_idx = remaining_indices[0]
+            best_min_dist = 0
+
+            for candidate_idx in remaining_indices:
+                min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
+                if min_dist_to_selected > best_min_dist:
+                    best_min_dist = min_dist_to_selected
+                    best_idx = candidate_idx
+
+            selected_indices.append(best_idx)
+
+    elif mode == "nearest":
+        dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
+        selected_indices = []
+
+        # Randomize starting point
+        if random_seed is not None:
+            import random
+            start_idx = random.randint(0, n_available - 1)
+        else:
+            start_idx = 0
+        selected_indices.append(start_idx)
+
+        for _ in range(n_points - 1):
+            remaining_indices = [i for i in range(n_available) if i not in selected_indices]
+            if not remaining_indices:
+                break
+
+            best_idx = remaining_indices[0]
+            best_min_dist = float('inf')
+
+            for candidate_idx in remaining_indices:
+                min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
+                if min_dist_to_selected < best_min_dist:
+                    best_min_dist = min_dist_to_selected
+                    best_idx = candidate_idx
+
+            selected_indices.append(best_idx)
+
+    elif mode == "moderate":
+        dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
+        selected_indices = []
+
+        # Randomize starting point
+        if random_seed is not None:
+            import random
+            start_idx = random.randint(0, n_available - 1)
+        else:
+            start_idx = 0
+        selected_indices.append(start_idx)
+
+        for _ in range(n_points - 1):
+            remaining_indices = [i for i in range(n_available) if i not in selected_indices]
+            if not remaining_indices:
+                break
+
+            best_idx = remaining_indices[0]
+            best_score = float('inf')
+
+            # Calculate min and max possible distances for normalization
+            all_min_distances = []
+            for candidate_idx in remaining_indices:
+                min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
+                all_min_distances.append(min_dist_to_selected)
+
+            if len(all_min_distances) > 1:
+                min_possible_dist = min(all_min_distances)
+                max_possible_dist = max(all_min_distances)
+
+                # Avoid division by zero
+                if max_possible_dist > min_possible_dist:
+                    for candidate_idx in remaining_indices:
+                        min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
+
+                        # Normalize distance to 0-1 range
+                        normalized_dist = (min_dist_to_selected - min_possible_dist) / (
+                                    max_possible_dist - min_possible_dist)
+
+
+                        score = abs(normalized_dist - target_value)
+
+                        if score < best_score:
+                            best_score = score
+                            best_idx = candidate_idx
+                else:
+                    best_idx = remaining_indices[0]
+            else:
+                best_idx = remaining_indices[0]
+
+            selected_indices.append(best_idx)
+
+    else:
+        import random
+        selected_indices = random.sample(range(n_available), n_points)
+
+    selected_coords_out = [frac_coords_list[i] for i in selected_indices]
+    return selected_coords_out, selected_indices
+
+
+import numpy as np
+from scipy.spatial.distance import cdist
+from scipy.spatial import cKDTree
+from sklearn.cluster import KMeans
+import random
+from typing import List, Tuple, Optional
+
+
+def compute_periodic_distance_matrix_optimized(frac_coords, max_distance=None):
+    """
+    Optimized distance matrix computation with early termination
+    """
+    n = len(frac_coords)
+
+    # For very large datasets, use sparse representation
+    if n > 10000 and max_distance is not None:
+        # Only compute distances up to max_distance
+        from scipy.sparse import lil_matrix
+        dist_matrix = lil_matrix((n, n))
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                delta = frac_coords[i] - frac_coords[j]
+                delta = delta - np.round(delta)
+                dist = np.linalg.norm(delta)
+                if dist <= max_distance:
+                    dist_matrix[i, j] = dist_matrix[j, i] = dist
+        return dist_matrix.tocsr()
+    else:
+        # Standard computation for smaller datasets
+        dist_matrix = np.zeros((n, n))
+        for i in range(n):
+            for j in range(i + 1, n):
+                delta = frac_coords[i] - frac_coords[j]
+                delta = delta - np.round(delta)
+                dist = np.linalg.norm(delta)
+                dist_matrix[i, j] = dist_matrix[j, i] = dist
+        return dist_matrix
+
+
+def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
+                                     target_value=0.5, random_seed=None,
+                                     min_distance_threshold=0.1):
+    """
+    Fast selection using KDTree for nearest neighbor queries
+    """
+    if not frac_coords_list or n_points == 0:
+        return [], []
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    frac_coords_array = np.array(frac_coords_list)
+    n_available = len(frac_coords_list)
+
+    if n_available <= n_points:
+        return frac_coords_list.copy(), list(range(n_available))
+
+    # For very large datasets, use clustering pre-selection
+    if n_available > 50000:
+        # Pre-cluster to reduce search space
+        n_clusters = min(n_points * 10, n_available // 10)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=random_seed, n_init=10)
+        cluster_labels = kmeans.fit_predict(frac_coords_array)
+
+        # Select representative points from each cluster
+        selected_indices = []
+        for cluster_id in range(n_clusters):
+            cluster_indices = np.where(cluster_labels == cluster_id)[0]
+            if len(cluster_indices) > 0:
+                # Randomly select one point from each cluster
+                selected_idx = np.random.choice(cluster_indices)
+                selected_indices.append(selected_idx)
+
+        # Reduce to the pre-selected points
+        frac_coords_array = frac_coords_array[selected_indices]
+        available_indices = selected_indices
+        n_available = len(available_indices)
+    else:
+        available_indices = list(range(n_available))
+
+    # Build KDTree for fast neighbor queries
+    # For periodic boundary conditions, we need to handle wrapping
+    # Create extended coordinates for periodic boundaries
+    extended_coords = []
+    extended_indices = []
+
+    for dx in [-1, 0, 1]:
+        for dy in [-1, 0, 1]:
+            for dz in [-1, 0, 1]:
+                offset_coords = frac_coords_array + np.array([dx, dy, dz])
+                extended_coords.append(offset_coords)
+                extended_indices.extend(available_indices)
+
+    extended_coords = np.vstack(extended_coords)
+    tree = cKDTree(extended_coords)
+
+    selected_indices = []
+
+    if mode == "random":
+        # Simple random selection with distance checking
+        attempts = 0
+        max_attempts = min(n_available * 5, 100000)
+
+        while len(selected_indices) < n_points and attempts < max_attempts:
+            attempts += 1
+            candidate_idx = random.randint(0, n_available - 1)
+
+            if len(selected_indices) == 0:
+                selected_indices.append(available_indices[candidate_idx])
+            else:
+                candidate_coord = frac_coords_array[candidate_idx]
+
+                # Query nearest neighbors
+                distances, _ = tree.query(candidate_coord, k=len(selected_indices) + 1)
+                min_dist_to_selected = np.min(distances[1:])  # Exclude self
+
+                if min_dist_to_selected >= min_distance_threshold:
+                    selected_indices.append(available_indices[candidate_idx])
+
+    elif mode == "farthest":
+        # Greedy farthest point selection
+        start_idx = random.randint(0, n_available - 1) if random_seed is not None else 0
+        selected_indices.append(available_indices[start_idx])
+
+        for _ in range(n_points - 1):
+            remaining_indices = [i for i in range(n_available)
+                                 if available_indices[i] not in selected_indices]
+            if not remaining_indices:
+                break
+
+            best_idx = remaining_indices[0]
+            best_min_dist = 0
+
+            for candidate_idx in remaining_indices:
+                candidate_coord = frac_coords_array[candidate_idx]
+
+                # Query distances to selected points
+                min_dist_to_selected = float('inf')
+                for sel_global_idx in selected_indices:
+                    sel_local_idx = available_indices.index(sel_global_idx)
+                    sel_coord = frac_coords_array[sel_local_idx]
+
+                    # Compute periodic distance
+                    delta = candidate_coord - sel_coord
+                    delta = delta - np.round(delta)
+                    dist = np.linalg.norm(delta)
+                    min_dist_to_selected = min(min_dist_to_selected, dist)
+
+                if min_dist_to_selected > best_min_dist:
+                    best_min_dist = min_dist_to_selected
+                    best_idx = candidate_idx
+
+            selected_indices.append(available_indices[best_idx])
+
+    elif mode == "nearest":
+        # Greedy nearest point selection
+        start_idx = random.randint(0, n_available - 1) if random_seed is not None else 0
+        selected_indices.append(available_indices[start_idx])
+
+        for _ in range(n_points - 1):
+            remaining_indices = [i for i in range(n_available)
+                                 if available_indices[i] not in selected_indices]
+            if not remaining_indices:
+                break
+
+            best_idx = remaining_indices[0]
+            best_min_dist = float('inf')
+
+            for candidate_idx in remaining_indices:
+                candidate_coord = frac_coords_array[candidate_idx]
+
+                # Query distances to selected points
+                min_dist_to_selected = float('inf')
+                for sel_global_idx in selected_indices:
+                    sel_local_idx = available_indices.index(sel_global_idx)
+                    sel_coord = frac_coords_array[sel_local_idx]
+
+                    # Compute periodic distance
+                    delta = candidate_coord - sel_coord
+                    delta = delta - np.round(delta)
+                    dist = np.linalg.norm(delta)
+                    min_dist_to_selected = min(min_dist_to_selected, dist)
+
+                if min_dist_to_selected < best_min_dist:
+                    best_min_dist = min_dist_to_selected
+                    best_idx = candidate_idx
+
+            selected_indices.append(available_indices[best_idx])
+
+    else:  # moderate
+        # Use clustering for moderate selection
+        if n_available > 1000:
+            # Use KMeans clustering
+            kmeans = KMeans(n_clusters=n_points, random_state=random_seed, n_init=10)
+            cluster_labels = kmeans.fit_predict(frac_coords_array)
+            cluster_centers = kmeans.cluster_centers_
+
+            # Find closest actual points to cluster centers
+            for center in cluster_centers:
+                distances = np.linalg.norm(frac_coords_array - center, axis=1)
+                closest_idx = np.argmin(distances)
+                if available_indices[closest_idx] not in selected_indices:
+                    selected_indices.append(available_indices[closest_idx])
+                if len(selected_indices) >= n_points:
+                    break
+        else:
+            # Fall back to original algorithm for smaller datasets
+            return select_spaced_points_original(frac_coords_list, n_points, mode,
+                                                 target_value, random_seed)
+
+    # Convert back to original coordinate system
+    if n_available > 50000:
+        # We used clustered indices
+        selected_coords_out = [frac_coords_list[i] for i in selected_indices]
+    else:
+        # Direct mapping
+        selected_coords_out = [frac_coords_list[available_indices.index(i)]
+                               for i in selected_indices]
+        selected_indices = [available_indices.index(i) for i in selected_indices]
+
+    return selected_coords_out, selected_indices
+
+
+def select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
+                                      target_value=0.5, random_seed=None):
+    """
+    Hierarchical selection for very large datasets
+    """
+    if not frac_coords_list or n_points == 0:
+        return [], []
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    n_available = len(frac_coords_list)
+
+    if n_available <= n_points:
+        return frac_coords_list.copy(), list(range(n_available))
+
+    # For very large datasets, use hierarchical approach
+    if n_available > 10000:
+        # Level 1: Random subsampling
+        subsample_size = min(10000, n_available)
+        subsample_indices = np.random.choice(n_available, subsample_size, replace=False)
+        subsample_coords = [frac_coords_list[i] for i in subsample_indices]
+
+        # Level 2: Apply selection algorithm on subsample
+        selected_coords, selected_local_indices = select_spaced_points_fast_kdtree(
+            subsample_coords, n_points, mode, target_value, random_seed
+        )
+
+        # Map back to original indices
+        selected_indices = [subsample_indices[i] for i in selected_local_indices]
+
+        return selected_coords, selected_indices
+    else:
+        return select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
+                                                target_value, random_seed)
+
+
+def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
+                                    grid_resolution=10, random_seed=None):
+    """
+    Grid-based selection for uniform distribution
+    """
+    if not frac_coords_list or n_points == 0:
+        return [], []
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    frac_coords_array = np.array(frac_coords_list)
+    n_available = len(frac_coords_list)
+
+    if n_available <= n_points:
+        return frac_coords_list.copy(), list(range(n_available))
+
+    # Create 3D grid
+    grid_points = {}
+    point_to_grid = {}
+
+    for i, coord in enumerate(frac_coords_array):
+        # Map to grid cell
+        grid_cell = tuple(np.floor(coord * grid_resolution).astype(int))
+        if grid_cell not in grid_points:
+            grid_points[grid_cell] = []
+        grid_points[grid_cell].append(i)
+        point_to_grid[i] = grid_cell
+
+    selected_indices = []
+
+    if mode == "random":
+        # Random selection with grid constraint
+        available_cells = list(grid_points.keys())
+        random.shuffle(available_cells)
+
+        for cell in available_cells:
+            if len(selected_indices) >= n_points:
+                break
+            cell_points = grid_points[cell]
+            selected_idx = random.choice(cell_points)
+            selected_indices.append(selected_idx)
+
+    elif mode in ["farthest", "nearest", "moderate"]:
+        # Select one point per grid cell first, then apply algorithm
+        grid_representatives = []
+        grid_rep_indices = []
+
+        for cell, cell_points in grid_points.items():
+            # Select representative point from each cell
+            rep_idx = random.choice(cell_points)
+            grid_representatives.append(frac_coords_list[rep_idx])
+            grid_rep_indices.append(rep_idx)
+
+        # Apply selection algorithm on grid representatives
+        if len(grid_representatives) <= n_points:
+            selected_coords = grid_representatives
+            selected_indices = grid_rep_indices
+        else:
+            selected_coords, local_indices = select_spaced_points_fast_kdtree(
+                grid_representatives, n_points, mode, random_seed=random_seed
+            )
+            selected_indices = [grid_rep_indices[i] for i in local_indices]
+
+    selected_coords_out = [frac_coords_list[i] for i in selected_indices]
+    return selected_coords_out, selected_indices
+
+
+
+# Example usage and performance comparison
+def benchmark_selection_methods():
+    """
+    Benchmark different selection methods
+    """
+    import time
+
+    # Generate test data
+    n_test_points = [1000, 5000, 10000, 50000]
+    n_select = 100
+
+    results = {}
+
+    for n in n_test_points:
+        print(f"\nTesting with {n} points, selecting {n_select}:")
+
+        # Generate random fractional coordinates
+        test_coords = np.random.rand(n, 3).tolist()
+
+        methods = [
+            ("KDTree", select_spaced_points_fast_kdtree),
+            ("Hierarchical", select_spaced_points_hierarchical),
+            ("Grid-based", select_spaced_points_grid_based)
+        ]
+
+        for method_name, method_func in methods:
+            try:
+                start_time = time.time()
+                selected_coords, selected_indices = method_func(
+                    test_coords, n_select, "farthest", random_seed=42
+                )
+                end_time = time.time()
+
+                execution_time = end_time - start_time
+                print(f"  {method_name}: {execution_time:.3f}s, selected {len(selected_coords)} points")
+
+                if n not in results:
+                    results[n] = {}
+                results[n][method_name] = execution_time
+
+            except Exception as e:
+                print(f"  {method_name}: Failed - {e}")
+
+    return results
+
+
+# Updated function to replace in your code
+def select_spaced_points(frac_coords_list, n_points, mode,
+                                   target_value=0.5, random_seed=None):
+    """
+    Main optimized function to replace your original select_spaced_points
+    """
+    n_available = len(frac_coords_list)
+
+    # Choose algorithm based on dataset size
+    if n_available < 1000:
+        st.write("ORIGINAL")
+        # Use original algorithm for small datasets
+        return select_spaced_points_original(frac_coords_list, n_points, mode,
+                                             target_value, random_seed)
+    elif n_available < 10000:
+        # Use KDTree-based algorithm
+        st.write("KDTREE")
+        return select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
+                                                target_value, random_seed)
+    elif n_available < 50000:
+        st.write("HIERARCH")
+        # Use hierarchical algorithm
+        return select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
+                                                 target_value, random_seed)
+    else:
+        # Use grid-based algorithm for very large datasets
+        st.write("GRIDBASE")
+        return select_spaced_points_grid_based(frac_coords_list, n_points, mode,
+                                               random_seed=random_seed)
+
+
+import numpy as np
+from scipy.spatial.distance import cdist
+from scipy.spatial import cKDTree
+import random
+
+
+def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_element, n_interstitials,
+                                               min_distance=2.0, grid_spacing=0.5, mode="random",
+                                               min_interstitial_distance=1.0, log_area=None, random_seed=None):
+    from pymatgen.io.ase import AseAtomsAdaptor
+    from pymatgen.core import Element
+
+    if log_area:
+        log_area.info(f"Optimized fast insertion: {n_interstitials} {interstitial_element} atoms...")
+
+    new_structure = structure_obj.copy()
+
+    try:
+        ase_atoms = AseAtomsAdaptor.get_atoms(structure_obj)
+        cell = ase_atoms.get_cell()
+        positions = ase_atoms.get_positions()
+        cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
+
+        # Strategy 1: Adaptive grid spacing based on structure size
+        n_atoms = len(structure_obj)
+        if n_atoms > 10000:
+            # Increase grid spacing for large structures
+            adaptive_spacing = max(grid_spacing, grid_spacing * (n_atoms / 10000) ** 0.3)
+            if log_area:
+                log_area.info(
+                    f"Large structure detected ({n_atoms} atoms). Adjusting grid spacing from {grid_spacing:.2f} to {adaptive_spacing:.2f} Å")
+            grid_spacing = adaptive_spacing
+
+        # Strategy 2: Limit maximum grid points
+        max_grid_points = 50000  # Configurable limit
+        n_points = [int(length / grid_spacing) + 1 for length in cell_lengths]
+        total_grid_points = np.prod(n_points)
+
+        if total_grid_points > max_grid_points:
+            # Scale down grid resolution
+            scale_factor = (max_grid_points / total_grid_points) ** (1 / 3)
+            n_points = [max(10, int(n * scale_factor)) for n in n_points]
+            if log_area:
+                log_area.info(f"Grid too large ({total_grid_points} points). Scaled to {np.prod(n_points)} points")
+
+        # Strategy 3: Random sampling instead of full grid for very large cases
+        if np.prod(n_points) > max_grid_points:
+            return insert_interstitials_random_sampling(structure_obj, interstitial_element, n_interstitials,
+                                                        min_distance, min_interstitial_distance, log_area, random_seed)
+
+        if log_area:
+            log_area.write(
+                f"Creating optimized grid: {n_points[0]}×{n_points[1]}×{n_points[2]} = {np.prod(n_points)} points")
+
+        # Generate grid points efficiently
+        grid_points = generate_grid_points_efficient(n_points)
+        grid_cart = np.dot(grid_points, cell.array)
+
+        # Strategy 4: Use KDTree for distance calculations
+        tree = cKDTree(positions)
+        min_distances_to_atoms = tree.query(grid_cart)[0]
+
+        valid_indices = np.where(min_distances_to_atoms >= min_distance)[0]
+        valid_points = grid_points[valid_indices]
+
+        if log_area:
+            log_area.write(f"Found {len(valid_points)} valid void sites (>{min_distance}Å from atoms)")
+
+        if len(valid_points) == 0:
+            if log_area: log_area.warning("No valid interstitial sites found")
+            return new_structure
+
+        # Strategy 5: Optimized selection
+        selected_points = select_interstitial_sites_optimized(
+            valid_points, n_interstitials, mode, min_interstitial_distance,
+            cell, log_area, random_seed
+        )
+
+        # Insert selected points
+        for point in selected_points:
+            new_structure.append(
+                species=Element(interstitial_element),
+                coords=point,
+                coords_are_cartesian=False,
+                validate_proximity=False
+            )
+
+        if log_area:
+            log_area.success(f"Successfully inserted {len(selected_points)} {interstitial_element} atoms")
+
+    except Exception as e:
+        if log_area: log_area.error(f"Error in optimized interstitial insertion: {e}")
+        return structure_obj
+
+    return new_structure
+
+
+def generate_grid_points_efficient(n_points):
+    """Generate grid points more efficiently using numpy"""
+    x = np.linspace(0, 1, n_points[0], endpoint=False)
+    y = np.linspace(0, 1, n_points[1], endpoint=False)
+    z = np.linspace(0, 1, n_points[2], endpoint=False)
+
+    # Use meshgrid and reshape for efficiency
+    X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
+    grid_points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
+    return grid_points
+
+
+def select_interstitial_sites_optimized(valid_points, n_interstitials, mode,
+                                        min_interstitial_distance, cell, log_area, random_seed):
+    """Optimized selection of interstitial sites"""
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    n_valid = len(valid_points)
+    n_to_insert = min(n_interstitials, n_valid)
+
+    if mode == "random":
+        return select_random_with_distance_constraint(valid_points, n_to_insert,
+                                                      min_interstitial_distance, cell, log_area)
+    else:
+        # Use the optimized select_spaced_points for other modes
+        valid_points_list = [valid_points[i] for i in range(len(valid_points))]
+        selected_coords, _ = select_spaced_points_optimized(valid_points_list, n_to_insert, mode, 0.5, random_seed)
+        return selected_coords
+
+
+def select_random_with_distance_constraint(valid_points, n_to_insert, min_distance, cell, log_area):
+    """Fast random selection with distance constraints"""
+    selected_points = []
+
+    if n_to_insert <= 0:
+        return selected_points
+
+    # Convert to cartesian for distance calculations
+    valid_cart = np.dot(valid_points, cell.array)
+
+    # Start with first random point
+    first_idx = random.randint(0, len(valid_points) - 1)
+    selected_points.append(valid_points[first_idx])
+    selected_cart = [valid_cart[first_idx]]
+
+    attempts = 0
+    max_attempts = min(len(valid_points) * 5, 100000)
+
+    while len(selected_points) < n_to_insert and attempts < max_attempts:
+        attempts += 1
+        candidate_idx = random.randint(0, len(valid_points) - 1)
+        candidate_cart = valid_cart[candidate_idx]
+
+        # Check distance to all selected points
+        if len(selected_cart) > 0:
+            distances = cdist([candidate_cart], selected_cart)[0]
+            min_dist = np.min(distances)
+
+            if min_dist >= min_distance:
+                selected_points.append(valid_points[candidate_idx])
+                selected_cart.append(candidate_cart)
+        else:
+            selected_points.append(valid_points[candidate_idx])
+            selected_cart.append(candidate_cart)
+
+    if log_area and len(selected_points) < n_to_insert:
+        log_area.warning(f"Only found {len(selected_points)} sites with required spacing after {attempts} attempts")
+
+    return selected_points
+
+
+def insert_interstitials_random_sampling(structure_obj, interstitial_element, n_interstitials,
+                                         min_distance, min_interstitial_distance, log_area, random_seed):
+    """Fallback method using random sampling for very large structures"""
+    from pymatgen.io.ase import AseAtomsAdaptor
+    from pymatgen.core import Element
+
+    if log_area:
+        log_area.info("Using random sampling method for very large structure")
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    new_structure = structure_obj.copy()
+    ase_atoms = AseAtomsAdaptor.get_atoms(structure_obj)
+    cell = ase_atoms.get_cell()
+    positions = ase_atoms.get_positions()
+
+    # Build KDTree for existing atoms
+    tree = cKDTree(positions)
+
+    selected_points = []
+    selected_cart = []
+    attempts = 0
+    max_attempts = n_interstitials * 1000  # Reasonable limit
+
+    while len(selected_points) < n_interstitials and attempts < max_attempts:
+        attempts += 1
+
+        # Generate random fractional coordinate
+        random_frac = np.random.rand(3)
+        random_cart = np.dot(random_frac, cell.array)
+
+        # Check distance to existing atoms
+        dist_to_atoms = tree.query(random_cart)[0]
+        if dist_to_atoms < min_distance:
+            continue
+
+        # Check distance to already selected interstitials
+        if len(selected_cart) > 0:
+            distances = cdist([random_cart], selected_cart)[0]
+            min_dist_to_selected = np.min(distances)
+            if min_dist_to_selected < min_interstitial_distance:
+                continue
+
+        # Point is valid
+        selected_points.append(random_frac)
+        selected_cart.append(random_cart)
+
+    # Insert selected points
+    for point in selected_points:
+        new_structure.append(
+            species=Element(interstitial_element),
+            coords=point,
+            coords_are_cartesian=False,
+            validate_proximity=False
+        )
+
+    if log_area:
+        log_area.info(
+            f"Random sampling: inserted {len(selected_points)} of {n_interstitials} requested atoms after {attempts} attempts")
+
+    return new_structure
+
+
+def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_interstitials,
+                                       min_distance=2.0, initial_grid_spacing=0.5, mode="random",
+                                       min_interstitial_distance=1.0, log_area=None, random_seed=None):
+    """Adaptive grid that adjusts based on available sites"""
+    from pymatgen.io.ase import AseAtomsAdaptor
+    from pymatgen.core import Element
+
+    if log_area:
+        log_area.info(f"Adaptive grid insertion: {n_interstitials} {interstitial_element} atoms...")
+
+    new_structure = structure_obj.copy()
+
+    try:
+        ase_atoms = AseAtomsAdaptor.get_atoms(structure_obj)
+        cell = ase_atoms.get_cell()
+        positions = ase_atoms.get_positions()
+        cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
+
+        # Start with coarse grid, refine if needed
+        grid_spacings = [initial_grid_spacing * 2, initial_grid_spacing, initial_grid_spacing * 0.7]
+
+        for grid_spacing in grid_spacings:
+            n_points = [int(length / grid_spacing) + 1 for length in cell_lengths]
+            total_points = np.prod(n_points)
+
+            if log_area:
+                log_area.write(f"Trying grid spacing {grid_spacing:.2f} Å ({total_points} points)")
+
+            if total_points > 100000:  # Skip if too many points
+                continue
+
+            # Generate and test grid
+            grid_points = generate_grid_points_efficient(n_points)
+            grid_cart = np.dot(grid_points, cell.array)
+
+            # Fast distance check
+            tree = cKDTree(positions)
+            min_distances = tree.query(grid_cart)[0]
+            valid_indices = np.where(min_distances >= min_distance)[0]
+
+            n_valid = len(valid_indices)
+            if log_area:
+                log_area.write(f"Found {n_valid} valid sites")
+
+            # If we have enough sites, use this grid
+            if n_valid >= n_interstitials * 2:  # 2x buffer
+                valid_points = grid_points[valid_indices]
+                selected_points = select_interstitial_sites_optimized(
+                    valid_points, n_interstitials, mode, min_interstitial_distance,
+                    cell, log_area, random_seed
+                )
+
+                # Insert points
+                for point in selected_points:
+                    new_structure.append(
+                        species=Element(interstitial_element),
+                        coords=point,
+                        coords_are_cartesian=False,
+                        validate_proximity=False
+                    )
+
+                if log_area:
+                    log_area.success(
+                        f"Adaptive grid: inserted {len(selected_points)} atoms with spacing {grid_spacing:.2f} Å")
+
+                return new_structure
+
+        # If no grid worked, fall back to random sampling
+        if log_area:
+            log_area.warning("Grid method failed, falling back to random sampling")
+
+        return insert_interstitials_random_sampling(structure_obj, interstitial_element, n_interstitials,
+                                                    min_distance, min_interstitial_distance, log_area, random_seed)
+
+    except Exception as e:
+        if log_area: log_area.error(f"Error in adaptive grid insertion: {e}")
+        return structure_obj
+
+
+# Wrapper function that chooses the best method
+def insert_interstitials_ase_fast(structure_obj, interstitial_element, n_interstitials,
+                                   min_distance=2.0, grid_spacing=0.5, mode="random",
+                                   min_interstitial_distance=1.0, log_area=None, random_seed=None):
+    """Smart wrapper that chooses the best insertion method based on structure size"""
+
+    n_atoms = len(structure_obj)
+
+    if log_area:
+        log_area.info(f"Smart interstitial insertion for {n_atoms} atom structure")
+
+    if n_atoms < 1000:
+        # Small structures: use original grid method
+        return insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_element, n_interstitials,
+                                                          min_distance, grid_spacing, mode, min_interstitial_distance,
+                                                          log_area, random_seed)
+    elif n_atoms < 50000:
+        # Medium structures: use adaptive grid
+        return insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_interstitials,
+                                                  min_distance, grid_spacing, mode, min_interstitial_distance,
+                                                  log_area, random_seed)
+    else:
+        # Large structures: use random sampling
+        return insert_interstitials_random_sampling(structure_obj, interstitial_element, n_interstitials,
+                                                    min_distance, min_interstitial_distance, log_area, random_seed)
+
+
+
+
+def insert_interstitials_into_structure(structure_obj, interstitial_element, n_interstitials,
+                                        which_interstitial_type_idx=0, mode="farthest",
+                                        clustering_tol_val=0.75, min_dist_val=0.5, target_value=0.5, log_area=None,
+                                        random_seed=None):
+    from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
+
+    if log_area: log_area.info(f"Attempting to insert {n_interstitials} of {interstitial_element}...")
+    new_structure_int = structure_obj.copy()
+    try:
+        generator = VoronoiInterstitialGenerator(clustering_tol=clustering_tol_val, min_dist=min_dist_val)
+        unique_interstitial_types = list(generator.generate(new_structure_int, "H"))
+        if not unique_interstitial_types:
+            if log_area: log_area.warning("VoronoiInterstitialGenerator found no candidate sites.")
+            return new_structure_int
+        if log_area:
+            log_area.write(f"Found {len(unique_interstitial_types)} unique interstitial site types.")
+            for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
+                site_label = classify_interstitial_site(new_structure_int, interstitial_type_obj.site.frac_coords)
+                log_area.write(
+                    f"  Type {i_type + 1}: at {np.round(interstitial_type_obj.site.frac_coords, 3)}, {site_label}, with {len(interstitial_type_obj.equivalent_sites)} equivalent sites.")
+
+        frac_coords_to_consider = []
+        if which_interstitial_type_idx == 0:
+            for interstitial_type_obj in unique_interstitial_types:
+                for eq_site in interstitial_type_obj.equivalent_sites:
+                    frac_coords_to_consider.append(eq_site.frac_coords)
+        elif 0 < which_interstitial_type_idx <= len(unique_interstitial_types):
+            interstitial_type_obj = unique_interstitial_types[which_interstitial_type_idx - 1]
+            for eq_site in interstitial_type_obj.equivalent_sites:
+                frac_coords_to_consider.append(eq_site.frac_coords)
+            if log_area: log_area.info(
+                f"Focusing on interstitial type {which_interstitial_type_idx} ({len(frac_coords_to_consider)} sites).")
+        else:
+            if log_area: log_area.warning(
+                f"Invalid interstitial type index: {which_interstitial_type_idx}. Max is {len(unique_interstitial_types)}. Using no sites.")
+            return new_structure_int
+
+        if not frac_coords_to_consider:
+            if log_area: log_area.warning("No interstitial sites available to select from based on criteria.")
+            return new_structure_int
+
+        num_to_actually_insert = min(n_interstitials, len(frac_coords_to_consider))
+        if num_to_actually_insert < n_interstitials and log_area:
+            log_area.warning(
+                f"Requested {n_interstitials} interstitials, but only {num_to_actually_insert} sites are available. Inserting {num_to_actually_insert}.")
+
+        if num_to_actually_insert > 0:
+            selected_points_coords, _ = select_spaced_points(frac_coords_to_consider, num_to_actually_insert, mode,
+                                                             target_value, random_seed)
+
+            if log_area: log_area.info(
+                f"Selected {len(selected_points_coords)} sites out of {len(frac_coords_to_consider)} available sites.")
+
+            for point_coords in selected_points_coords:
+                new_structure_int.append(
+                    species=Element(interstitial_element),
+                    coords=point_coords,
+                    coords_are_cartesian=False,
+                    validate_proximity=True
+                )
+            if log_area: log_area.info(
+                f"Successfully inserted {len(selected_points_coords)} {interstitial_element} atoms.")
+        else:
+            if log_area: log_area.info("No interstitials were inserted based on parameters.")
+    except Exception as e_int:
+        if log_area: log_area.error(f"Error during interstitial insertion: {e_int}")
+    return new_structure_int
+
+
+def remove_vacancies_from_structure(structure_obj, vacancy_percentages_dict, selection_mode_vac="farthest",
+                                    target_value_vac=0.5, log_area=None, random_seed=None):
+    if random_seed is not None:
+        import random
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    if log_area: log_area.info(f"Attempting to create vacancies...")
+    st.info("HERE?")
+    new_structure_vac = structure_obj.copy()
+    st.info("HERE NOT?")
+    indices_to_remove_overall = []
+    for el_symbol, perc_to_remove in vacancy_percentages_dict.items():
+        if perc_to_remove <= 0: continue
+        el_indices_in_struct = [i for i, site in enumerate(new_structure_vac.sites) if
+                                site.specie and site.specie.symbol == el_symbol]
+        n_sites_of_el = len(el_indices_in_struct)
+        n_to_remove_for_el = int(round(n_sites_of_el * perc_to_remove / 100.0))
+        if log_area: log_area.write(
+            f"  For element {el_symbol}: Found {n_sites_of_el} sites. Requested to remove {perc_to_remove}% ({n_to_remove_for_el} atoms).")
+        if n_to_remove_for_el == 0: continue
+        if n_to_remove_for_el > n_sites_of_el:
+            if log_area: log_area.warning(
+                f"    Cannot remove {n_to_remove_for_el} atoms of {el_symbol}, only {n_sites_of_el} exist. Removing all.")
+            n_to_remove_for_el = n_sites_of_el
+        el_frac_coords = [new_structure_vac.sites[i].frac_coords for i in el_indices_in_struct]
+        if not el_frac_coords and n_to_remove_for_el > 0:
+            if log_area: log_area.warning(f"    No coordinates found for {el_symbol} to select from.")
+            continue
+        _, selected_local_indices_for_removal = select_spaced_points(el_frac_coords, n_to_remove_for_el,
+                                                                     selection_mode_vac, target_value_vac, random_seed)
+        global_indices_for_this_el_removal = [el_indices_in_struct[i] for i in selected_local_indices_for_removal]
+        indices_to_remove_overall.extend(global_indices_for_this_el_removal)
+        if log_area: log_area.write(
+            f"    Selected {len(global_indices_for_this_el_removal)} sites of {el_symbol} for removal.")
+    if indices_to_remove_overall:
+        unique_indices_to_remove = sorted(list(set(indices_to_remove_overall)), reverse=True)
+        new_structure_vac.remove_sites(unique_indices_to_remove)
+        if log_area: log_area.info(f"Attempted to remove {len(unique_indices_to_remove)} atoms in total.")
+    else:
+        if log_area: log_area.info("No atoms were selected for vacancy creation.")
+    return new_structure_vac
+
+
+def substitute_atoms_in_structure(structure_obj, substitution_settings_dict, selection_mode_sub="farthest",
+                                  target_value_sub=0.5, log_area=None, random_seed=None):
+    if random_seed is not None:
+        import random
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    if log_area: log_area.info(f"Attempting substitutions...")
+    new_species_list = [site.species for site in structure_obj.sites]
+    new_coords_list = [site.frac_coords for site in structure_obj.sites]
+    modified_indices_count = 0
+    for orig_el_symbol, settings in substitution_settings_dict.items():
+        perc_to_sub = settings.get("percentage", 0)
+        sub_el_symbol = settings.get("substitute", "").strip()
+        if perc_to_sub <= 0 or not sub_el_symbol: continue
+        try:
+            sub_element = Element(sub_el_symbol)
+        except Exception:
+            if log_area: log_area.warning(
+                f"  Invalid substitute element symbol: '{sub_el_symbol}'. Skipping for {orig_el_symbol}.")
+            continue
+        orig_el_indices_in_struct = [i for i, site in enumerate(structure_obj.sites) if
+                                     site.specie and site.specie.symbol == orig_el_symbol]
+        n_sites_of_orig_el = len(orig_el_indices_in_struct)
+        n_to_sub_for_el = int(round(n_sites_of_orig_el * perc_to_sub / 100.0))
+        if log_area: log_area.write(
+            f"  For {orig_el_symbol} -> {sub_el_symbol}: Found {n_sites_of_orig_el} sites of {orig_el_symbol}. Requested to substitute {perc_to_sub}% ({n_to_sub_for_el} atoms).")
+        if n_to_sub_for_el == 0: continue
+        if n_to_sub_for_el > n_sites_of_orig_el:
+            if log_area: log_area.warning(
+                f"    Cannot substitute {n_to_sub_for_el} atoms of {orig_el_symbol}, only {n_sites_of_orig_el} exist. Substituting all.")
+            n_to_sub_for_el = n_sites_of_orig_el
+        orig_el_frac_coords = [structure_obj.sites[i].frac_coords for i in orig_el_indices_in_struct]
+        if not orig_el_frac_coords and n_to_sub_for_el > 0:
+            if log_area: log_area.warning(f"    No coordinates found for {orig_el_symbol} to select from.")
+            continue
+        _, selected_local_indices_for_substitution = select_spaced_points(orig_el_frac_coords, n_to_sub_for_el,
+                                                                          selection_mode_sub, target_value_sub,
+                                                                          random_seed)
+        global_indices_for_this_el_substitution = [orig_el_indices_in_struct[i] for i in
+                                                   selected_local_indices_for_substitution]
+        for global_idx_to_sub in global_indices_for_this_el_substitution:
+            new_species_list[global_idx_to_sub] = sub_element
+            modified_indices_count += 1
+        if log_area: log_area.write(
+            f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for substitution with {sub_el_symbol}.")
+    if modified_indices_count > 0:
+        final_substituted_structure = Structure(lattice=structure_obj.lattice, species=new_species_list,
+                                                coords=new_coords_list, coords_are_cartesian=False)
+        if log_area: log_area.info(f"Attempted to substitute {modified_indices_count} atoms in total.")
+        return final_substituted_structure
+    else:
+        if log_area: log_area.info("No atoms were selected for substitution.")
+        return structure_obj.copy()
+
+
+def get_orthogonal_cell(structure, max_atoms=200):
+    from pymatgen.transformations.advanced_transformations import CubicSupercellTransformation
+
+    from pymatgen.io.ase import AseAtomsAdaptor
+    ase_atoms = AseAtomsAdaptor.get_atoms(structure)
+    angles = ase_atoms.get_cell_lengths_and_angles()[3:]
+    if all(abs(angle - 90.0) < 1e-6 for angle in angles):
+        return structure.copy()
+
+    try:
+        transformer = CubicSupercellTransformation(
+            max_atoms=max_atoms,
+            min_atoms=len(structure),
+            force_90_degrees=True,
+            allow_orthorhombic=True,
+            angle_tolerance=0.1,
+            min_length=5.0
+        )
+
+        orthogonal_structure = transformer.apply_transformation(structure)
+        return orthogonal_structure
+
+    except Exception as e:
+        try:
+            from pymatgen.transformations.standard_transformations import SupercellTransformation
+
+            supercell_matrices = [
+                [[2, 0, 0], [0, 2, 0], [0, 0, 1]],
+                [[1, -1, 0], [1, 1, 0], [0, 0, 1]],
+                [[2, -1, 0], [1, 1, 0], [0, 0, 1]]
+            ]
+
+            for matrix in supercell_matrices:
+                try:
+                    sc_transformer = SupercellTransformation(matrix)
+                    test_structure = sc_transformer.apply_transformation(structure)
+
+                    ase_test = AseAtomsAdaptor.get_atoms(test_structure)
+                    test_angles = ase_test.get_cell_lengths_and_angles()[3:]
+
+                    if all(abs(angle - 90.0) < 5.0 for angle in test_angles):
+                        return test_structure
+
+                except Exception:
+                    continue
+
+        except Exception:
+            pass
+
+        return structure.copy()
+
+
+def get_structure_info(structure):
+    if structure is None:
+        return "No structure", ""
+
+    atom_count = len(structure)
+    ase_atoms = AseAtomsAdaptor.get_atoms(structure)
+    cell_params = ase_atoms.get_cell_lengths_and_angles()
+    volume = ase_atoms.get_volume()
+
+    info_text = f"(**{atom_count} atoms)**\n"
+
+    element_counts = {}
+    for site in structure:
+        element = site.specie.symbol
+        element_counts[element] = element_counts.get(element, 0) + 1
+
+    element_info = ", ".join([f"{elem}: {count}" for elem, count in sorted(element_counts.items())])
+    info_text += f"**Elements:** ({element_info})\n\n"
+
+    info_text += f"a={cell_params[0]:.3f} Å, b={cell_params[1]:.3f} Å, c={cell_params[2]:.3f} Å\n"
+    info_text += f"α={cell_params[3]:.1f}°, β={cell_params[4]:.1f}°, γ={cell_params[5]:.1f}°\n"
+    info_text += f"Vol={volume:.2f} Å³"
+
+    return info_text
+
+
+
+def insert_database(ELEMENTS):
+    with st.expander("Search for Structures Online in Databases", icon="🔍", expanded=True):
+        cols, cols2, cols3 = st.columns([1.5, 1.5, 3.5])
+        with cols:
+            db_choices = st.multiselect(
+                "Select Database(s)",
+                options=["Materials Project", "AFLOW", "COD"],
+                default=["Materials Project", "AFLOW", "COD"],
+                help="Choose which databases to search for structures. You can select multiple databases."
+            )
+
+            if not db_choices:
+                st.warning("Please select at least one database to search.")
+
+            st.markdown("**Maximum number of structures to be found in each database (for improving performance):**")
+            col_limits = st.columns(3)
+
+            search_limits = {}
+            if "Materials Project" in db_choices:
+                with col_limits[0]:
+                    search_limits["Materials Project"] = st.number_input(
+                        "MP Limit:", min_value=1, max_value=2000, value=300, step=10,
+                        help="Maximum results from Materials Project"
+                    )
+            if "AFLOW" in db_choices:
+                with col_limits[1]:
+                    search_limits["AFLOW"] = st.number_input(
+                        "AFLOW Limit:", min_value=1, max_value=2000, value=300, step=10,
+                        help="Maximum results from AFLOW"
+                    )
+            if "COD" in db_choices:
+                with col_limits[2]:
+                    search_limits["COD"] = st.number_input(
+                        "COD Limit:", min_value=1, max_value=2000, value=300, step=10,
+                        help="Maximum results from COD"
+                    )
+
+        with cols2:
+            search_mode = st.radio(
+                "Search by:",
+                options=["Elements", "Structure ID", "Space Group + Elements", "Formula", "Search Mineral"],
+                help="Choose your search strategy"
+            )
+
+            if search_mode == "Elements":
+                selected_elements = st.multiselect(
+                    "Select elements for search:",
+                    options=ELEMENTS,
+                    default=["Sr", "Ti", "O"],
+                    help="Choose one or more chemical elements"
+                )
+                search_query = " ".join(selected_elements) if selected_elements else ""
+
+            elif search_mode == "Structure ID":
+                structure_ids = st.text_area(
+                    "Enter Structure IDs (one per line):",
+                    value="mp-5229\ncod_1512124\naflow:010158cb2b41a1a5",
+                    help="Enter structure IDs. Examples:\n- Materials Project: mp-5229\n- COD: cod_1512124 (with cod_ prefix)\n- AFLOW: aflow:010158cb2b41a1a5 (AUID format)"
+                )
+
+            elif search_mode == "Space Group + Elements":
+                col_sg1, col_sg2 = st.columns(2)
+                with col_sg1:
+                    all_space_groups_help = "Enter space group number (1-230)\n\nAll space groups:\n\n"
+                    for num in sorted(SPACE_GROUP_SYMBOLS.keys()):
+                        all_space_groups_help += f"• {num}: {SPACE_GROUP_SYMBOLS[num]}\n\n"
+
+                    space_group_number = st.number_input(
+                        "Space Group Number:",
+                        min_value=1,
+                        max_value=230,
+                        value=221,
+                        help=all_space_groups_help
+                    )
+                    sg_symbol = get_space_group_info(space_group_number)
+                    st.info(f"#:**{sg_symbol}**")
+
+                selected_elements = st.multiselect(
+                    "Select elements for search:",
+                    options=ELEMENTS,
+                    default=["Sr", "Ti", "O"],
+                    help="Choose one or more chemical elements"
+                )
+
+            elif search_mode == "Formula":
+                formula_input = st.text_input(
+                    "Enter Chemical Formula:",
+                    value="Sr Ti O3",
+                    help="Enter chemical formula with spaces between elements. Examples:\n- Sr Ti O3 (strontium titanate)\n- Ca C O3 (calcium carbonate)\n- Al2 O3 (alumina)"
+                )
+
+            elif search_mode == "Search Mineral":
+                mineral_options = []
+                mineral_mapping = {}
+
+                for space_group, minerals in MINERALS.items():
+                    for mineral_name, formula in minerals.items():
+                        option_text = f"{mineral_name} - SG #{space_group}"
+                        mineral_options.append(option_text)
+                        mineral_mapping[option_text] = {
+                            'space_group': space_group,
+                            'formula': formula,
+                            'mineral_name': mineral_name
+                        }
+                mineral_options.sort()
+
+                selected_mineral = st.selectbox(
+                    "Select Mineral Structure:",
+                    options=mineral_options,
+                    help="Choose a mineral structure type. The exact formula and space group will be automatically set.",
+                    index=2
+                )
+
+                if selected_mineral:
+                    mineral_info = mineral_mapping[selected_mineral]
+
+                    sg_symbol = get_space_group_info(mineral_info['space_group'])
+                    st.info(f"**Structure:** {mineral_info['mineral_name']}, **Space Group:** {mineral_info['space_group']} ({sg_symbol}), "
+                            f"**Formula:** {mineral_info['formula']}")
+
+
+                    space_group_number = mineral_info['space_group']
+                    formula_input = mineral_info['formula']
+
+                    st.success(f"**Search will use:** Formula = {formula_input}, Space Group = {space_group_number}")
+
+            show_element_info = st.checkbox("ℹ️ Show information about element groups")
+            if show_element_info:
+                st.markdown("""
+                **Element groups note:**
+                **Common Elements (14):** H, C, N, O, F, Na, Mg, Al, Si, P, S, Cl, K, Ca  
+                **Transition Metals (10):** Sc, Ti, V, Cr, Mn, Fe, Co, Ni, Cu, Zn  
+                **Alkali Metals (6):** Li, Na, K, Rb, Cs, Fr  
+                **Alkaline Earth (6):** Be, Mg, Ca, Sr, Ba, Ra  
+                **Noble Gases (6):** He, Ne, Ar, Kr, Xe, Rn  
+                **Halogens (5):** F, Cl, Br, I, At  
+                **Lanthanides (15):** La, Ce, Pr, Nd, Pm, Sm, Eu, Gd, Tb, Dy, Ho, Er, Tm, Yb, Lu  
+                **Actinides (15):** Ac, Th, Pa, U, Np, Pu, Am, Cm, Bk, Cf, Es, Fm, Md, No, Lr  
+                **Other Elements (51):** All remaining elements
+                """)
+
+        if st.button("Search Selected Databases"):
+            if not db_choices:
+                st.error("Please select at least one database to search.")
+            else:
+                for db_choice in db_choices:
+                    if db_choice == "Materials Project":
+                        mp_limit = search_limits.get("Materials Project", 50)
+                        with st.spinner(f"Searching **the MP database** (limit: {mp_limit}), please wait. 😊"):
+                            try:
+                                with MPRester(MP_API_KEY) as mpr:
+                                    docs = None
+
+                                    if search_mode == "Elements":
+                                        elements_list = [el.strip() for el in search_query.split() if el.strip()]
+                                        if not elements_list:
+                                            st.error("Please enter at least one element for the search.")
+                                            continue
+                                        elements_list_sorted = sorted(set(elements_list))
+                                        docs = mpr.materials.summary.search(
+                                            elements=elements_list_sorted,
+                                            num_elements=len(elements_list_sorted),
+                                            fields=["material_id", "formula_pretty", "symmetry", "nsites", "volume"]
+                                        )
+
+                                    elif search_mode == "Structure ID":
+                                        mp_ids = [id.strip() for id in structure_ids.split('\n')
+                                                  if id.strip() and id.strip().startswith('mp-')]
+                                        if not mp_ids:
+                                            st.warning("No valid Materials Project IDs found (should start with 'mp-')")
+                                            continue
+                                        docs = mpr.materials.summary.search(
+                                            material_ids=mp_ids,
+                                            fields=["material_id", "formula_pretty", "symmetry", "nsites", "volume"]
+                                        )
+
+                                    elif search_mode == "Space Group + Elements":
+                                        elements_list = sorted(set(selected_elements))
+                                        if not elements_list:
+                                            st.warning(
+                                                "Please select elements for Materials Project space group search.")
+                                            continue
+
+                                        search_params = {
+                                            "elements": elements_list,
+                                            "num_elements": len(elements_list),
+                                            "fields": ["material_id", "formula_pretty", "symmetry", "nsites", "volume"],
+                                            "spacegroup_number": space_group_number
+                                        }
+
+                                        docs = mpr.materials.summary.search(**search_params)
+
+                                    elif search_mode == "Formula":
+                                        if not formula_input.strip():
+                                            st.warning("Please enter a chemical formula for Materials Project search.")
+                                            continue
+
+                                        # Convert space-separated format to compact format (Sr Ti O3 -> SrTiO3)
+                                        clean_formula = formula_input.strip()
+                                        if ' ' in clean_formula:
+                                            parts = clean_formula.split()
+                                            compact_formula = ''.join(parts)
+                                        else:
+                                            compact_formula = clean_formula
+
+                                        docs = mpr.materials.summary.search(
+                                            formula=compact_formula,
+                                            fields=["material_id", "formula_pretty", "symmetry", "nsites", "volume"]
+                                        )
+
+                                    elif search_mode == "Search Mineral":
+                                        if not selected_mineral:
+                                            st.warning(
+                                                "Please select a mineral structure for Materials Project search.")
+                                            continue
+                                        clean_formula = formula_input.strip()
+                                        if ' ' in clean_formula:
+                                            parts = clean_formula.split()
+                                            compact_formula = ''.join(parts)
+                                        else:
+                                            compact_formula = clean_formula
+
+                                        # Search by formula and space group
+                                        docs = mpr.materials.summary.search(
+                                            formula=compact_formula,
+                                            spacegroup_number=space_group_number,
+                                            fields=["material_id", "formula_pretty", "symmetry", "nsites", "volume"]
+                                        )
+
+                                    if docs:
+                                        status_placeholder = st.empty()
+                                        st.session_state.mp_options = []
+                                        st.session_state.full_structures_see = {}
+                                        limited_docs = docs[:mp_limit]
+
+                                        for doc in limited_docs:
+                                            full_structure = mpr.get_structure_by_material_id(doc.material_id,
+                                                                                              conventional_unit_cell=True)
+                                            st.session_state.full_structures_see[doc.material_id] = full_structure
+                                            lattice = full_structure.lattice
+                                            leng = len(full_structure)
+                                            lattice_str = (f"{lattice.a:.3f} {lattice.b:.3f} {lattice.c:.3f} Å, "
+                                                           f"{lattice.alpha:.1f}, {lattice.beta:.1f}, {lattice.gamma:.1f} °")
+                                            st.session_state.mp_options.append(
+                                                f"{doc.material_id}: {doc.formula_pretty} ({doc.symmetry.symbol} #{doc.symmetry.number}) [{lattice_str}], {float(doc.volume):.1f} Å³, {leng} atoms"
+                                            )
+                                            status_placeholder.markdown(
+                                                f"- **Structure loaded:** `{full_structure.composition.reduced_formula}` ({doc.material_id})"
+                                            )
+                                        if len(limited_docs) < len(docs):
+                                            st.info(
+                                                f"Showing first {mp_limit} of {len(docs)} total Materials Project results. Increase limit to see more.")
+                                        st.success(
+                                            f"Found {len(st.session_state.mp_options)} structures in Materials Project.")
+                                    else:
+                                        st.session_state.mp_options = []
+                                        st.warning("No matching structures found in Materials Project.")
+                            except Exception as e:
+                                st.error(f"An error occurred with Materials Project: {e}")
+
+                    elif db_choice == "AFLOW":
+                        aflow_limit = search_limits.get("AFLOW", 50)
+                        with st.spinner(f"Searching **the AFLOW database** (limit: {aflow_limit}), please wait. 😊"):
+                            try:
+                                results = []
+
+                                if search_mode == "Elements":
+                                    elements_list = [el.strip() for el in search_query.split() if el.strip()]
+                                    if not elements_list:
+                                        st.warning("Please enter elements for AFLOW search.")
+                                        continue
+                                    ordered_elements = sorted(elements_list)
+                                    ordered_str = ",".join(ordered_elements)
+                                    aflow_nspecies = len(ordered_elements)
+
+                                    results = list(
+                                        search(catalog="icsd")
+                                        .filter((AFLOW_K.species % ordered_str) & (AFLOW_K.nspecies == aflow_nspecies))
+                                        .select(
+                                            AFLOW_K.auid,
+                                            AFLOW_K.compound,
+                                            AFLOW_K.geometry,
+                                            AFLOW_K.spacegroup_relax,
+                                            AFLOW_K.aurl,
+                                            AFLOW_K.files,
+                                        )
+                                    )
+
+                                elif search_mode == "Structure ID":
+                                    aflow_auids = []
+                                    for id_line in structure_ids.split('\n'):
+                                        id_line = id_line.strip()
+                                        if id_line.startswith('aflow:'):
+                                            auid = id_line.replace('aflow:', '').strip()
+                                            aflow_auids.append(auid)
+
+                                    if not aflow_auids:
+                                        st.warning("No valid AFLOW AUIDs found (should start with 'aflow:')")
+                                        continue
+
+                                    results = []
+                                    for auid in aflow_auids:
+                                        try:
+                                            result = list(search(catalog="icsd")
+                                                          .filter(AFLOW_K.auid == f"aflow:{auid}")
+                                                          .select(AFLOW_K.auid, AFLOW_K.compound, AFLOW_K.geometry,
+                                                                  AFLOW_K.spacegroup_relax, AFLOW_K.aurl,
+                                                                  AFLOW_K.files))
+                                            results.extend(result)
+                                        except Exception as e:
+                                            st.warning(f"AFLOW search failed for AUID '{auid}': {e}")
+                                            continue
+
+                                elif search_mode == "Space Group + Elements":
+                                    if not selected_elements:
+                                        st.warning("Please select elements for AFLOW space group search.")
+                                        continue
+                                    ordered_elements = sorted(selected_elements)
+                                    ordered_str = ",".join(ordered_elements)
+                                    aflow_nspecies = len(ordered_elements)
+
+                                    try:
+                                        results = list(search(catalog="icsd")
+                                                       .filter((AFLOW_K.species % ordered_str) &
+                                                               (AFLOW_K.nspecies == aflow_nspecies) &
+                                                               (AFLOW_K.spacegroup_relax == space_group_number))
+                                                       .select(AFLOW_K.auid, AFLOW_K.compound, AFLOW_K.geometry,
+                                                               AFLOW_K.spacegroup_relax, AFLOW_K.aurl, AFLOW_K.files))
+                                    except Exception as e:
+                                        st.warning(f"AFLOW space group search failed: {e}")
+                                        results = []
+
+
+                                elif search_mode == "Formula":
+
+                                    if not formula_input.strip():
+                                        st.warning("Please enter a chemical formula for AFLOW search.")
+
+                                        continue
+
+
+                                    def convert_to_aflow_formula(formula_input):
+
+                                        import re
+
+                                        formula_parts = formula_input.strip().split()
+
+                                        elements_dict = {}
+
+                                        for part in formula_parts:
+
+                                            match = re.match(r'([A-Z][a-z]?)(\d*)', part)
+
+                                            if match:
+                                                element = match.group(1)
+
+                                                count = match.group(2) if match.group(
+                                                    2) else "1"  # Add "1" if no number
+
+                                                elements_dict[element] = count
+
+                                        aflow_parts = []
+
+                                        for element in sorted(elements_dict.keys()):
+                                            aflow_parts.append(f"{element}{elements_dict[element]}")
+
+                                        return "".join(aflow_parts)
+
+
+                                    # Generate 2x multiplied formula
+                                    def multiply_formula_by_2(formula_input):
+
+                                        import re
+
+                                        formula_parts = formula_input.strip().split()
+
+                                        elements_dict = {}
+
+                                        for part in formula_parts:
+
+                                            match = re.match(r'([A-Z][a-z]?)(\d*)', part)
+
+                                            if match:
+                                                element = match.group(1)
+
+                                                count = int(match.group(2)) if match.group(2) else 1
+
+                                                elements_dict[element] = str(count * 2)  # Multiply by 2
+
+                                        aflow_parts = []
+
+                                        for element in sorted(elements_dict.keys()):
+                                            aflow_parts.append(f"{element}{elements_dict[element]}")
+
+                                        return "".join(aflow_parts)
+
+
+                                    aflow_formula = convert_to_aflow_formula(formula_input)
+
+                                    aflow_formula_2x = multiply_formula_by_2(formula_input)
+
+                                    if aflow_formula_2x != aflow_formula:
+
+                                        results = list(search(catalog="icsd")
+
+                                                       .filter((AFLOW_K.compound == aflow_formula) |
+
+                                                               (AFLOW_K.compound == aflow_formula_2x))
+
+                                                       .select(AFLOW_K.auid, AFLOW_K.compound, AFLOW_K.geometry,
+
+                                                               AFLOW_K.spacegroup_relax, AFLOW_K.aurl, AFLOW_K.files))
+
+                                        st.info(
+                                            f"Searching for both {aflow_formula} and {aflow_formula_2x} formulas simultaneously")
+
+                                    else:
+                                        results = list(search(catalog="icsd")
+                                                       .filter(AFLOW_K.compound == aflow_formula)
+                                                       .select(AFLOW_K.auid, AFLOW_K.compound, AFLOW_K.geometry,
+                                                               AFLOW_K.spacegroup_relax, AFLOW_K.aurl, AFLOW_K.files))
+
+                                        st.info(f"Searching for formula {aflow_formula}")
+
+
+                                elif search_mode == "Search Mineral":
+                                    if not selected_mineral:
+                                        st.warning("Please select a mineral structure for AFLOW search.")
+                                        continue
+
+
+                                    def convert_to_aflow_formula_mineral(formula_input):
+                                        import re
+                                        formula_parts = formula_input.strip().split()
+                                        elements_dict = {}
+                                        for part in formula_parts:
+
+                                            match = re.match(r'([A-Z][a-z]?)(\d*)', part)
+                                            if match:
+                                                element = match.group(1)
+
+                                                count = match.group(2) if match.group(
+                                                    2) else "1"  # Always add "1" for single atoms
+
+                                                elements_dict[element] = count
+
+                                        aflow_parts = []
+
+                                        for element in sorted(elements_dict.keys()):
+                                            aflow_parts.append(f"{element}{elements_dict[element]}")
+
+                                        return "".join(aflow_parts)
+
+
+                                    def multiply_mineral_formula_by_2(formula_input):
+
+                                        import re
+
+                                        formula_parts = formula_input.strip().split()
+
+                                        elements_dict = {}
+
+                                        for part in formula_parts:
+                                            match = re.match(r'([A-Z][a-z]?)(\d*)', part)
+                                            if match:
+                                                element = match.group(1)
+                                                count = int(match.group(2)) if match.group(2) else 1
+                                                elements_dict[element] = str(count * 2)  # Multiply by 2
+                                        aflow_parts = []
+                                        for element in sorted(elements_dict.keys()):
+                                            aflow_parts.append(f"{element}{elements_dict[element]}")
+                                        return "".join(aflow_parts)
+
+
+                                    aflow_formula = convert_to_aflow_formula_mineral(formula_input)
+
+                                    aflow_formula_2x = multiply_mineral_formula_by_2(formula_input)
+
+                                    # Search for both formulas with space group constraint in a single query
+
+                                    if aflow_formula_2x != aflow_formula:
+                                        results = list(search(catalog="icsd")
+                                                       .filter(((AFLOW_K.compound == aflow_formula) |
+                                                                (AFLOW_K.compound == aflow_formula_2x)) &
+                                                               (AFLOW_K.spacegroup_relax == space_group_number))
+                                                       .select(AFLOW_K.auid, AFLOW_K.compound, AFLOW_K.geometry,
+                                                               AFLOW_K.spacegroup_relax, AFLOW_K.aurl, AFLOW_K.files))
+
+                                        st.info(
+                                            f"Searching {mineral_info['mineral_name']} for both {aflow_formula} and {aflow_formula_2x} with space group {space_group_number}")
+
+                                    else:
+                                        results = list(search(catalog="icsd")
+                                                       .filter((AFLOW_K.compound == aflow_formula) &
+                                                               (AFLOW_K.spacegroup_relax == space_group_number))
+                                                       .select(AFLOW_K.auid, AFLOW_K.compound, AFLOW_K.geometry,
+                                                               AFLOW_K.spacegroup_relax, AFLOW_K.aurl, AFLOW_K.files))
+
+                                        st.info(
+                                            f"Searching {mineral_info['mineral_name']} for formula {aflow_formula} with space group {space_group_number}")
+
+                                if results:
+                                    status_placeholder = st.empty()
+                                    st.session_state.aflow_options = []
+                                    st.session_state.entrys = {}
+
+                                    limited_results = results[:aflow_limit]
+
+                                    for entry in limited_results:
+                                        st.session_state.entrys[entry.auid] = entry
+                                        st.session_state.aflow_options.append(
+                                            f"{entry.auid}: {entry.compound} ({entry.spacegroup_relax}) {entry.geometry}"
+                                        )
+                                        status_placeholder.markdown(
+                                            f"- **Structure loaded:** `{entry.compound}` (aflow_{entry.auid})"
+                                        )
+                                    if len(limited_results) < len(results):
+                                        st.info(
+                                            f"Showing first {aflow_limit} of {len(results)} total AFLOW results. Increase limit to see more.")
+                                    st.success(f"Found {len(st.session_state.aflow_options)} structures in AFLOW.")
+                                else:
+                                    st.session_state.aflow_options = []
+                                    st.warning("No matching structures found in AFLOW.")
+                            except Exception as e:
+                                st.warning(f"No matching structures found in AFLOW.")
+                                st.session_state.aflow_options = []
+
+                    elif db_choice == "COD":
+                        cod_limit = search_limits.get("COD", 50)
+                        with st.spinner(f"Searching **the COD database** (limit: {cod_limit}), please wait. 😊"):
+                            try:
+                                cod_entries = []
+
+                                if search_mode == "Elements":
+                                    elements = [el.strip() for el in search_query.split() if el.strip()]
+                                    if elements:
+                                        params = {'format': 'json', 'detail': '1'}
+                                        for i, el in enumerate(elements, start=1):
+                                            params[f'el{i}'] = el
+                                        params['strictmin'] = str(len(elements))
+                                        params['strictmax'] = str(len(elements))
+                                        cod_entries = get_cod_entries(params)
+                                    else:
+                                        st.warning("Please enter elements for COD search.")
+                                        continue
+
+                                elif search_mode == "Structure ID":
+                                    cod_ids = []
+                                    for id_line in structure_ids.split('\n'):
+                                        id_line = id_line.strip()
+                                        if id_line.startswith('cod_'):
+                                            # Extract numeric ID from cod_XXXXX format
+                                            numeric_id = id_line.replace('cod_', '').strip()
+                                            if numeric_id.isdigit():
+                                                cod_ids.append(numeric_id)
+
+                                    if not cod_ids:
+                                        st.warning(
+                                            "No valid COD IDs found (should start with 'cod_' followed by numbers)")
+                                        continue
+
+                                    cod_entries = []
+                                    for cod_id in cod_ids:
+                                        try:
+                                            params = {'format': 'json', 'detail': '1', 'id': cod_id}
+                                            entry = get_cod_entries(params)
+                                            if entry:
+                                                if isinstance(entry, list):
+                                                    cod_entries.extend(entry)
+                                                else:
+                                                    cod_entries.append(entry)
+                                        except Exception as e:
+                                            st.warning(f"COD search failed for ID {cod_id}: {e}")
+                                            continue
+
+                                elif search_mode == "Space Group + Elements":
+                                    elements = selected_elements
+                                    if elements:
+                                        params = {'format': 'json', 'detail': '1'}
+                                        for i, el in enumerate(elements, start=1):
+                                            params[f'el{i}'] = el
+                                        params['strictmin'] = str(len(elements))
+                                        params['strictmax'] = str(len(elements))
+                                        params['space_group_number'] = str(space_group_number)
+
+                                        cod_entries = get_cod_entries(params)
+                                    else:
+                                        st.warning("Please select elements for COD space group search.")
+                                        continue
+
+                                elif search_mode == "Formula":
+                                    if not formula_input.strip():
+                                        st.warning("Please enter a chemical formula for COD search.")
+                                        continue
+
+                                    # alphabet sorting
+                                    alphabet_form = sort_formula_alphabetically(formula_input)
+                                    print(alphabet_form)
+                                    params = {'format': 'json', 'detail': '1', 'formula': alphabet_form}
+                                    cod_entries = get_cod_entries(params)
+
+                                elif search_mode == "Search Mineral":
+                                    if not selected_mineral:
+                                        st.warning("Please select a mineral structure for COD search.")
+                                        continue
+
+                                    # Use both formula and space group for COD search
+                                    alphabet_form = sort_formula_alphabetically(formula_input)
+                                    params = {
+                                        'format': 'json',
+                                        'detail': '1',
+                                        'formula': alphabet_form,
+                                        'space_group_number': str(space_group_number)
+                                    }
+                                    cod_entries = get_cod_entries(params)
+
+                                if cod_entries and isinstance(cod_entries, list):
+                                    status_placeholder = st.empty()
+                                    st.session_state.cod_options = []
+                                    st.session_state.full_structures_see_cod = {}
+
+                                    limited_entries = cod_entries[:cod_limit]
+
+                                    for entry in limited_entries:
+                                        try:
+                                            cif_content = get_cif_from_cod(entry)
+                                            if cif_content:
+                                                structure = get_cod_str(cif_content)
+                                                cod_id = f"cod_{entry.get('file')}"
+                                                st.session_state.full_structures_see_cod[cod_id] = structure
+                                                spcs = entry.get("sg", "Unknown")
+                                                spcs_number = entry.get("sgNumber", "Unknown")
+
+                                                cell_volume = structure.lattice.volume
+                                                st.session_state.cod_options.append(
+                                                    f"{cod_id}: {structure.composition.reduced_formula} ({spcs} #{spcs_number}) [{structure.lattice.a:.3f} {structure.lattice.b:.3f} {structure.lattice.c:.3f} Å, {structure.lattice.alpha:.2f} "
+                                                    f"{structure.lattice.beta:.2f} {structure.lattice.gamma:.2f}] °, {cell_volume:.1f} Å³, {len(structure)} atoms "
+                                                )
+                                                status_placeholder.markdown(
+                                                    f"- **Structure loaded:** `{structure.composition.reduced_formula}` (cod_{entry.get('file')})")
+                                        except Exception as e:
+                                            st.warning(
+                                                f"Error processing COD entry {entry.get('file', 'unknown')}: {e}")
+                                            continue
+
+                                    if st.session_state.cod_options:
+                                        if len(limited_entries) < len(cod_entries):
+                                            st.info(
+                                                f"Showing first {cod_limit} of {len(cod_entries)} total COD results. Increase limit to see more.")
+                                        st.success(f"Found {len(st.session_state.cod_options)} structures in COD.")
+                                    else:
+                                        st.warning("COD: No valid structures could be processed.")
+                                else:
+                                    st.session_state.cod_options = []
+                                    st.warning("COD: No matching structures found.")
+                            except Exception as e:
+                                st.warning(f"COD search error: {e}")
+                                st.session_state.cod_options = []
+
+           # with cols2:
+           #     image = Image.open("images/Rabbit2.png")
+           #     st.image(image, use_container_width=True)
+
+        with cols3:
+            if any(x in st.session_state for x in ['mp_options', 'aflow_options', 'cod_options']):
+                tabs = []
+                if 'mp_options' in st.session_state and st.session_state.mp_options:
+                    tabs.append("Materials Project")
+                if 'aflow_options' in st.session_state and st.session_state.aflow_options:
+                    tabs.append("AFLOW")
+                if 'cod_options' in st.session_state and st.session_state.cod_options:
+                    tabs.append("COD")
+
+                if tabs:
+                    selected_tab = st.tabs(tabs)
+
+                    tab_index = 0
+                    if 'mp_options' in st.session_state and st.session_state.mp_options:
+                        with selected_tab[tab_index]:
+                            st.subheader("🧬 Structures Found in Materials Project")
+                            selected_structure = st.selectbox("Select a structure from MP:",
+                                                              st.session_state.mp_options)
+                            selected_id = selected_structure.split(":")[0].strip()
+                            composition = selected_structure.split(":", 1)[1].split("(")[0].strip()
+                            file_name = f"{selected_id}_{composition}.cif"
+                            file_name = re.sub(r'[\\/:"*?<>|]+', '_', file_name)
+
+                            if selected_id in st.session_state.full_structures_see:
+                                selected_entry = st.session_state.full_structures_see[selected_id]
+
+                                conv_lattice = selected_entry.lattice
+                                cell_volume = selected_entry.lattice.volume
+                                density = str(selected_entry.density).split()[0]
+                                n_atoms = len(selected_entry)
+                                atomic_den = n_atoms / cell_volume
+
+                                structure_type = identify_structure_type(selected_entry)
+                                st.write(f"**Structure type:** {structure_type}")
+                                analyzer = SpacegroupAnalyzer(selected_entry)
+                                st.write(
+                                    f"**Space Group:** {analyzer.get_space_group_symbol()} ({analyzer.get_space_group_number()})")
+
+                                st.write(
+                                    f"**Material ID:** {selected_id}, **Formula:** {composition}, N. of Atoms {n_atoms}")
+
+                                st.write(
+                                    f"**Conventional Lattice:** a = {conv_lattice.a:.4f} Å, b = {conv_lattice.b:.4f} Å, c = {conv_lattice.c:.4f} Å, α = {conv_lattice.alpha:.1f}°, β = {conv_lattice.beta:.1f}°, γ = {conv_lattice.gamma:.1f}° (Volume {cell_volume:.1f} Å³)")
+                                st.write(f"**Density:** {float(density):.2f} g/cm³ ({atomic_den:.4f} 1/Å³)")
+
+                                mp_url = f"https://materialsproject.org/materials/{selected_id}"
+                                st.write(f"**Link:** {mp_url}")
+
+                                col_mpd, col_mpb = st.columns([2, 1])
+                                with col_mpd:
+                                    if st.button("Add Selected Structure (MP)", key="add_btn_mp"):
+                                        pmg_structure = st.session_state.full_structures_see[selected_id]
+                                        check_structure_size_and_warn(pmg_structure, f"MP structure {selected_id}")
+                                        st.session_state.full_structures[file_name] = pmg_structure
+                                        cif_writer = CifWriter(pmg_structure)
+                                        cif_content = cif_writer.__str__()
+                                        cif_file = io.BytesIO(cif_content.encode('utf-8'))
+                                        cif_file.name = file_name
+                                        if 'uploaded_files' not in st.session_state:
+                                            st.session_state.uploaded_files = []
+                                        if all(f.name != file_name for f in st.session_state.uploaded_files):
+                                            st.session_state.uploaded_files.append(cif_file)
+                                        st.success("Structure added from Materials Project!")
+                                with col_mpb:
+                                    st.download_button(
+                                        label="Download MP CIF",
+                                        data=str(
+                                            CifWriter(st.session_state.full_structures_see[selected_id], symprec=0.01)),
+                                        file_name=file_name,
+                                        type="primary",
+                                        mime="chemical/x-cif"
+                                    )
+                                    st.info(
+                                        f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
+                        tab_index += 1
+
+                    if 'aflow_options' in st.session_state and st.session_state.aflow_options:
+                        with selected_tab[tab_index]:
+                            st.subheader("🧬 Structures Found in AFLOW")
+                            st.warning(
+                                "The AFLOW does not provide atomic occupancies and includes only information about primitive cell in API. For better performance, volume and n. of atoms are purposely omitted from the expander.")
+                            selected_structure = st.selectbox("Select a structure from AFLOW:",
+                                                              st.session_state.aflow_options)
+                            selected_auid = selected_structure.split(": ")[0].strip()
+                            selected_entry = next(
+                                (entry for entry in st.session_state.entrys.values() if entry.auid == selected_auid),
+                                None)
+                            if selected_entry:
+
+                                cif_files = [f for f in selected_entry.files if
+                                             f.endswith("_sprim.cif") or f.endswith(".cif")]
+
+                                if cif_files:
+
+                                    cif_filename = cif_files[0]
+
+                                    # Correct the AURL: replace the first ':' with '/'
+
+                                    host_part, path_part = selected_entry.aurl.split(":", 1)
+
+                                    corrected_aurl = f"{host_part}/{path_part}"
+
+                                    file_url = f"http://{corrected_aurl}/{cif_filename}"
+                                    response = requests.get(file_url)
+                                    cif_content = response.content
+
+                                    structure_from_aflow = Structure.from_str(cif_content.decode('utf-8'), fmt="cif")
+                                    converted_structure = get_full_conventional_structure(structure_from_aflow,
+                                                                                          symprec=0.1)
+
+                                    conv_lattice = converted_structure.lattice
+                                    cell_volume = converted_structure.lattice.volume
+                                    density = str(converted_structure.density).split()[0]
+                                    n_atoms = len(converted_structure)
+                                    atomic_den = n_atoms / cell_volume
+
+                                    structure_type = identify_structure_type(converted_structure)
+                                    st.write(f"**Structure type:** {structure_type}")
+                                    analyzer = SpacegroupAnalyzer(structure_from_aflow)
+                                    st.write(
+                                        f"**Space Group:** {analyzer.get_space_group_symbol()} ({analyzer.get_space_group_number()})")
+                                    st.write(
+                                        f"**AUID:** {selected_entry.auid}, **Formula:** {selected_entry.compound}, **N. of Atoms:** {n_atoms}")
+                                    st.write(
+                                        f"**Conventional Lattice:** a = {conv_lattice.a:.4f} Å, b = {conv_lattice.b:.4f} Å, c = {conv_lattice.c:.4f} Å, α = {conv_lattice.alpha:.1f}°, β = {conv_lattice.beta:.1f}°, "
+                                        f"γ = {conv_lattice.gamma:.1f}° (Volume {cell_volume:.1f} Å³)")
+                                    st.write(f"**Density:** {float(density):.2f} g/cm³ ({atomic_den:.4f} 1/Å³)")
+
+                                    linnk = f"https://aflowlib.duke.edu/search/ui/material/?id=" + selected_entry.auid
+                                    st.write("**Link:**", linnk)
+
+                                    if st.button("Add Selected Structure (AFLOW)", key="add_btn_aflow"):
+                                        if 'uploaded_files' not in st.session_state:
+                                            st.session_state.uploaded_files = []
+                                        cif_file = io.BytesIO(cif_content)
+                                        cif_file.name = f"{selected_entry.compound}_{selected_entry.auid}.cif"
+
+                                        st.session_state.full_structures[cif_file.name] = structure_from_aflow
+
+                                        check_structure_size_and_warn(structure_from_aflow, cif_file.name)
+                                        if all(f.name != cif_file.name for f in st.session_state.uploaded_files):
+                                            st.session_state.uploaded_files.append(cif_file)
+                                        st.success("Structure added from AFLOW!")
+
+                                    st.download_button(
+                                        label="Download AFLOW CIF",
+                                        data=cif_content,
+                                        file_name=f"{selected_entry.compound}_{selected_entry.auid}.cif",
+                                        type="primary",
+                                        mime="chemical/x-cif"
+                                    )
+                                    st.info(
+                                        f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
+                                else:
+                                    st.warning("No CIF file found for this AFLOW entry.")
+                        tab_index += 1
+
+                    # COD tab
+                    if 'cod_options' in st.session_state and st.session_state.cod_options:
+                        with selected_tab[tab_index]:
+                            st.subheader("🧬 Structures Found in COD")
+                            selected_cod_structure = st.selectbox(
+                                "Select a structure from COD:",
+                                st.session_state.cod_options,
+                                key='sidebar_select_cod'
+                            )
+                            cod_id = selected_cod_structure.split(":")[0].strip()
+                            if cod_id in st.session_state.full_structures_see_cod:
+                                selected_entry = st.session_state.full_structures_see_cod[cod_id]
+                                lattice = selected_entry.lattice
+                                cell_volume = selected_entry.lattice.volume
+                                density = str(selected_entry.density).split()[0]
+                                n_atoms = len(selected_entry)
+                                atomic_den = n_atoms / cell_volume
+
+                                idcodd = cod_id.removeprefix("cod_")
+
+                                structure_type = identify_structure_type(selected_entry)
+                                st.write(f"**Structure type:** {structure_type}")
+                                analyzer = SpacegroupAnalyzer(selected_entry)
+                                st.write(
+                                    f"**Space Group:** {analyzer.get_space_group_symbol()} ({analyzer.get_space_group_number()})")
+
+                                st.write(
+                                    f"**COD ID:** {idcodd}, **Formula:** {selected_entry.composition.reduced_formula}, **N. of Atoms:** {n_atoms}")
+                                st.write(
+                                    f"**Conventional Lattice:** a = {lattice.a:.3f} Å, b = {lattice.b:.3f} Å, c = {lattice.c:.3f} Å, α = {lattice.alpha:.2f}°, β = {lattice.beta:.2f}°, γ = {lattice.gamma:.2f}° (Volume {cell_volume:.1f} Å³)")
+                                st.write(f"**Density:** {float(density):.2f} g/cm³ ({atomic_den:.4f} 1/Å³)")
+
+                                cod_url = f"https://www.crystallography.net/cod/{cod_id.split('_')[1]}.html"
+                                st.write(f"**Link:** {cod_url}")
+
+                                file_name = f"{selected_entry.composition.reduced_formula}_COD_{cod_id.split('_')[1]}.cif"
+
+                                if st.button("Add Selected Structure (COD)", key="sid_add_btn_cod"):
+                                    cif_writer = CifWriter(selected_entry, symprec=0.01)
+                                    cif_data = str(cif_writer)
+                                    st.session_state.full_structures[file_name] = selected_entry
+                                    cif_file = io.BytesIO(cif_data.encode('utf-8'))
+                                    cif_file.name = file_name
+                                    if 'uploaded_files' not in st.session_state:
+                                        st.session_state.uploaded_files = []
+                                    if all(f.name != file_name for f in st.session_state.uploaded_files):
+                                        st.session_state.uploaded_files.append(cif_file)
+
+                                    check_structure_size_and_warn(selected_entry, file_name)
+                                    st.success("Structure added from COD!")
+
+                                st.download_button(
+                                    label="Download COD CIF",
+                                    data=str(CifWriter(selected_entry, symprec=0.01)),
+                                    file_name=file_name,
+                                    mime="chemical/x-cif", type="primary",
+                                )
+                                st.info(
+                                    f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
+
