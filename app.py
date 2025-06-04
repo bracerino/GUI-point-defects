@@ -1765,13 +1765,21 @@ if st.session_state.uploaded_files:
             if st.session_state.represented_structure:
                 current_lattice = st.session_state.represented_structure.lattice
 
-                if f"lattice_a_{st.session_state.selected_file}" not in st.session_state:
-                    st.session_state[f"lattice_a_{st.session_state.selected_file}"] = current_lattice.a
-                    st.session_state[f"lattice_b_{st.session_state.selected_file}"] = current_lattice.b
-                    st.session_state[f"lattice_c_{st.session_state.selected_file}"] = current_lattice.c
-                    st.session_state[f"lattice_alpha_{st.session_state.selected_file}"] = current_lattice.alpha
-                    st.session_state[f"lattice_beta_{st.session_state.selected_file}"] = current_lattice.beta
-                    st.session_state[f"lattice_gamma_{st.session_state.selected_file}"] = current_lattice.gamma
+                lattice_key_a = f"lattice_a_{st.session_state.selected_file}"
+                lattice_key_b = f"lattice_b_{st.session_state.selected_file}"
+                lattice_key_c = f"lattice_c_{st.session_state.selected_file}"
+                lattice_key_alpha = f"lattice_alpha_{st.session_state.selected_file}"
+                lattice_key_beta = f"lattice_beta_{st.session_state.selected_file}"
+                lattice_key_gamma = f"lattice_gamma_{st.session_state.selected_file}"
+
+                # Initialize all session state values at once
+                if lattice_key_a not in st.session_state:
+                    st.session_state[lattice_key_a] = float(current_lattice.a)
+                    st.session_state[lattice_key_b] = float(current_lattice.b)
+                    st.session_state[lattice_key_c] = float(current_lattice.c)
+                    st.session_state[lattice_key_alpha] = float(current_lattice.alpha)
+                    st.session_state[lattice_key_beta] = float(current_lattice.beta)
+                    st.session_state[lattice_key_gamma] = float(current_lattice.gamma)
 
                 try:
                     sga = SpacegroupAnalyzer(st.session_state.represented_structure)
@@ -2100,8 +2108,12 @@ if st.session_state.uploaded_files:
                                     el_count = sum(
                                         1 for site in active_pmg_for_defects.sites if site.specie.symbol == el_v)
                                     with vac_perc_cols[c_idx]:
-                                        vac_percent[el_v] = st.number_input(
-                                            f"% {el_v} (total: {el_count})", 0.0, 100.0, 0.0, 1.0, "%.1f",
+                                        vac_percent[el_v] = st.slider(
+                                            f"% {el_v} (total: {el_count})",
+                                            min_value=0.00,
+                                            max_value=100.00,
+                                            value=0.00,
+                                            step=0.10,
                                             key=f"vac_perc_{el_v}",
                                             help=f"Remove percentage of {el_count} {el_v} atoms"
                                         )
@@ -2140,37 +2152,35 @@ if st.session_state.uploaded_files:
                     sub_settings = {}
                     if sub_els:
                         st.markdown("**Set substitution parameters:**")
-                        cols_pr_s = 2
-                        n_rows_s = (len(sub_els) + cols_pr_s - 1) // cols_pr_s
-                        for r_s in range(n_rows_s):
-                            sub_perc_cols = st.columns(cols_pr_s * 2)
-                            for c_idx_s in range(cols_pr_s):
-                                el_idx_s = r_s * cols_pr_s + c_idx_s
-                                if el_idx_s < len(sub_els):
-                                    el_s = sub_els[el_idx_s]
-                                    el_count_s = sum(
-                                        1 for site in active_pmg_for_defects.sites if site.specie.symbol == el_s)
-                                    wc1, wc2 = c_idx_s * 2, c_idx_s * 2 + 1
-                                    if wc2 < len(sub_perc_cols):
-                                        with sub_perc_cols[wc1]:
-                                            sub_p = st.number_input(
-                                                f"% {el_s} (total: {el_count_s})", 0.0, 100.0, 0.0, 1.0, "%.1f",
-                                                key=f"sub_p_{el_s}",
-                                                help=f"Substitute percentage of {el_count_s} {el_s} atoms"
-                                            )
-                                        with sub_perc_cols[wc2]:
-                                            sub_t_el = st.text_input(f"Replace {el_s} with", key=f"sub_t_{el_s}")
-                                        sub_settings[el_s] = {"percentage": sub_p, "substitute": sub_t_el.strip()}
-                                    elif wc1 < len(sub_perc_cols):
-                                        with sub_perc_cols[wc1]:
-                                            sub_p = st.number_input(
-                                                f"% {el_s} (total: {el_count_s})", 0.0, 100.0, 0.0, 1.0, "%.1f",
-                                                key=f"sub_p_{el_s}",
-                                                help=f"Substitute percentage of {el_count_s} {el_s} atoms"
-                                            )
-                                            sub_t_el = st.text_input(f"Replace {el_s} with", key=f"sub_t_{el_s}",
-                                                                     help="Substitute element")
-                                            sub_settings[el_s] = {"percentage": sub_p, "substitute": sub_t_el.strip()}
+
+                        for el_s in sub_els:
+                            el_count_s = sum(
+                                1 for site in active_pmg_for_defects.sites if site.specie.symbol == el_s)
+
+                            st.markdown(f"**Element: {el_s} (total: {el_count_s} atoms)**")
+                            sub_col1, sub_col2 = st.columns(2)
+
+                            with sub_col1:
+                                sub_p = st.slider(
+                                    f"Percentage of {el_s} to substitute",
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                    value=0.0,
+                                    step=0.1,
+                                    key=f"sub_p_{el_s}",
+                                    help=f"Substitute percentage of {el_count_s} {el_s} atoms"
+                                )
+
+                            with sub_col2:
+                                sub_t_el = st.selectbox(
+                                    f"Replace {el_s} with:",
+                                    options= ELEMENTS,
+                                    index=0,
+                                    key=f"sub_t_{el_s}",
+                                    help="Select substitute element"
+                                )
+
+                            sub_settings[el_s] = {"percentage": sub_p, "substitute": sub_t_el.strip()}
 
                         st.markdown("**Preview of substitutions to be made:**")
                         preview_text_sub = []
@@ -2180,7 +2190,8 @@ if st.session_state.uploaded_files:
                             sub_el_symbol = settings.get("substitute", "").strip()
                             if perc_to_sub > 0 and sub_el_symbol:
                                 el_count_sub = sum(
-                                    1 for site in active_pmg_for_defects.sites if site.specie.symbol == orig_el_symbol)
+                                    1 for site in active_pmg_for_defects.sites if
+                                    site.specie.symbol == orig_el_symbol)
                                 n_to_substitute = int(round(el_count_sub * perc_to_sub / 100.0))
                                 total_to_substitute += n_to_substitute
                                 preview_text_sub.append(
