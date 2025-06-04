@@ -2025,8 +2025,8 @@ if st.session_state.uploaded_files:
 
         if st.session_state.supercell_settings_applied and st.session_state.current_structure_before_defects:
             st.markdown("### 3. Create Point Defects on the Applied Supercell")
-            if st.session_state.current_structure != st.session_state.current_structure_before_defects and not st.session_state.helpful:
-                st.session_state.current_structure = st.session_state.current_structure_before_defects.copy()
+            #if st.session_state.current_structure != st.session_state.current_structure_before_defects and not st.session_state.helpful:
+            #    st.session_state.current_structure = st.session_state.current_structure_before_defects.copy()
 
             active_pmg_for_defects = st.session_state.current_structure
             col_defect_ops, col_defect_log = st.columns([2, 1])
