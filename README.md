@@ -1,5 +1,5 @@
 # GUI-point-defects
-XRDlicious submodule for creating random point defects (interstitials, substitutes, vacancies) in crystal structures. Try it here: xrdlicious-point-defects.streamlit.app/
+XRDlicious submodule for creating random point defects (interstitials, substitutes, vacancies) in crystal structures. Try it here: [xrdlicious-point-defects.streamlit.app/](https://xrdlicious-point-defects.streamlit.app/)
 
 For more computationally demanding calculations with more extensive data, please compile the code locally on your computer (follow the manual below).
 # **How to compile and run the XRDlicious submodule for point defects locally:** 
