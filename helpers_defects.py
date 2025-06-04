@@ -2218,7 +2218,6 @@ def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_in
 def insert_interstitials_ase_fast(structure_obj, interstitial_element, n_interstitials,
                                    min_distance=2.0, grid_spacing=0.5, mode="random",
                                    min_interstitial_distance=1.0, log_area=None, random_seed=None):
-    """Smart wrapper that chooses the best insertion method based on structure size"""
 
     n_atoms = len(structure_obj)
 
@@ -2226,7 +2225,6 @@ def insert_interstitials_ase_fast(structure_obj, interstitial_element, n_interst
         log_area.info(f"Smart interstitial insertion for {n_atoms} atom structure")
 
     if n_atoms < 1000:
-        # Small structures: use original grid method
         return insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_element, n_interstitials,
                                                           min_distance, grid_spacing, mode, min_interstitial_distance,
                                                           log_area, random_seed)
