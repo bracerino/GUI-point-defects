@@ -1155,9 +1155,6 @@ if uploaded_files_user_sidebar:
                 if file_data.name in st.session_state.full_structures: del st.session_state.full_structures[
                     file_data.name]
 
-st.sidebar.markdown("### Final List of Structure Files:")
-st.sidebar.write(
-    [f.name for f in st.session_state.uploaded_files] if st.session_state.uploaded_files else "No files uploaded yet.")
 
 st.sidebar.markdown("### 🗑️ Remove uploaded structure(s)")
 files_to_remove_names = []
@@ -1295,8 +1292,9 @@ if st.session_state.uploaded_files:
                 current_info = get_structure_info(st.session_state.represented_structure)
                 st.markdown(f"**Current: {st.session_state.current_cell_representation_type}**")
                 st.markdown(current_info)
-        st.markdown("**Modify Lattice Parameters**")
-        modi_lattice = st.checkbox("Allow to modify lattice parameters")
+        with col_checkbox:
+            st.markdown("**Modify Lattice Parameters**")
+            modi_lattice = st.checkbox("Allow to modify lattice parameters")
         if modi_lattice:
             if st.session_state.represented_structure:
                 current_lattice = st.session_state.represented_structure.lattice
