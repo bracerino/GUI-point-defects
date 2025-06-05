@@ -157,7 +157,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR, ...)")
+st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR,  XYZ (with lattice) ...)")
 col1_header, col2_header = st.columns([1.25, 1])
 with col2_header:
     st.info(
