@@ -48,489 +48,6 @@ ELEMENTS = [
 ]
 
 
-def display_structure_types():
-    if st.checkbox("See Crystal Structure Types"):
-        with st.expander("Structure Types by Space Group", expanded=True):
-            for sg, types in sorted(STRUCTURE_TYPES.items()):
-                sg_symbol = SPACE_GROUP_SYMBOLS.get(sg, "Unknown")
-                header = f"**Space Group {sg} ({sg_symbol})**"
-                line = " | ".join([f"`{formula}` → {name}" for formula, name in types.items()])
-                st.markdown(f"{header}: {line}")
-
-
-
-
-def classify_interstitial_site(structure, frac_coords, dummy_element="H"):
-    from pymatgen.analysis.local_env import CrystalNN
-    temp_struct = structure.copy()
-    temp_struct.append(dummy_element, frac_coords, coords_are_cartesian=False)
-    cnn = CrystalNN()
-    try:
-        nn_info = cnn.get_nn_info(temp_struct, len(temp_struct) - 1)
-    except Exception as e:
-        st.write("CrystalNN error:", e)
-        nn_info = []
-    cn = len(nn_info)
-
-    if cn == 4:
-        return f"CN = {cn} **(Tetrahedral)**"
-    elif cn == 6:
-        return f"CN = {cn} **(Octahedral)**"
-    elif cn == 3:
-        return f"CN = {cn} (Trigonal Planar)"
-    elif cn == 5:
-        return f"CN = {cn} (Trigonal Bipyramidal)"
-    else:
-        return f"CN = {cn}"
-
-
-def wrap_coordinates(frac_coords):
-    return np.array(frac_coords) % 1
-
-
-def compute_periodic_distance_matrix(frac_coords):
-    n = len(frac_coords)
-    dist_matrix = np.zeros((n, n))
-    if n > 1:
-        for i in range(n):
-            for j in range(i + 1, n):
-                delta = frac_coords[i] - frac_coords[j]
-                delta = delta - np.round(delta)
-                dist = np.linalg.norm(delta)
-                dist_matrix[i, j] = dist_matrix[j, i] = dist
-    return dist_matrix
-
-
-def select_spaced_points(frac_coords_list, n_points, mode, target_value=0.5, random_seed=None):
-    if not frac_coords_list or n_points == 0:
-        return [], []
-
-    if random_seed is not None:
-        import random
-        random.seed(random_seed)
-        np.random.seed(random_seed)
-
-    frac_coords_array = np.array(frac_coords_list)
-    n_available = len(frac_coords_list)
-
-    if n_available <= n_points:
-        selected_indices = list(range(n_available))
-        selected_coords_out = frac_coords_list.copy()
-        return selected_coords_out, selected_indices
-
-    if mode == "farthest":
-        dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
-        selected_indices = []
-
-        # Randomize starting point
-        if random_seed is not None:
-            import random
-            start_idx = random.randint(0, n_available - 1)
-        else:
-            start_idx = 0
-        selected_indices.append(start_idx)
-
-        for _ in range(n_points - 1):
-            remaining_indices = [i for i in range(n_available) if i not in selected_indices]
-            if not remaining_indices:
-                break
-
-            best_idx = remaining_indices[0]
-            best_min_dist = 0
-
-            for candidate_idx in remaining_indices:
-                min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
-                if min_dist_to_selected > best_min_dist:
-                    best_min_dist = min_dist_to_selected
-                    best_idx = candidate_idx
-
-            selected_indices.append(best_idx)
-
-    elif mode == "nearest":
-        dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
-        selected_indices = []
-
-        # Randomize starting point
-        if random_seed is not None:
-            import random
-            start_idx = random.randint(0, n_available - 1)
-        else:
-            start_idx = 0
-        selected_indices.append(start_idx)
-
-        for _ in range(n_points - 1):
-            remaining_indices = [i for i in range(n_available) if i not in selected_indices]
-            if not remaining_indices:
-                break
-
-            best_idx = remaining_indices[0]
-            best_min_dist = float('inf')
-
-            for candidate_idx in remaining_indices:
-                min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
-                if min_dist_to_selected < best_min_dist:
-                    best_min_dist = min_dist_to_selected
-                    best_idx = candidate_idx
-
-            selected_indices.append(best_idx)
-
-    elif mode == "moderate":
-        dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
-        selected_indices = []
-
-        # Randomize starting point
-        if random_seed is not None:
-            import random
-            start_idx = random.randint(0, n_available - 1)
-        else:
-            start_idx = 0
-        selected_indices.append(start_idx)
-
-        for _ in range(n_points - 1):
-            remaining_indices = [i for i in range(n_available) if i not in selected_indices]
-            if not remaining_indices:
-                break
-
-            best_idx = remaining_indices[0]
-            best_score = float('inf')
-
-            # Calculate min and max possible distances for normalization
-            all_min_distances = []
-            for candidate_idx in remaining_indices:
-                min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
-                all_min_distances.append(min_dist_to_selected)
-
-            if len(all_min_distances) > 1:
-                min_possible_dist = min(all_min_distances)
-                max_possible_dist = max(all_min_distances)
-
-                # Avoid division by zero
-                if max_possible_dist > min_possible_dist:
-                    for candidate_idx in remaining_indices:
-                        min_dist_to_selected = min(dist_matrix[candidate_idx][sel_idx] for sel_idx in selected_indices)
-
-                        # Normalize distance to 0-1 range
-                        normalized_dist = (min_dist_to_selected - min_possible_dist) / (
-                                    max_possible_dist - min_possible_dist)
-
-
-                        score = abs(normalized_dist - target_value)
-
-                        if score < best_score:
-                            best_score = score
-                            best_idx = candidate_idx
-                else:
-                    best_idx = remaining_indices[0]
-            else:
-                best_idx = remaining_indices[0]
-
-            selected_indices.append(best_idx)
-
-    else:
-        import random
-        selected_indices = random.sample(range(n_available), n_points)
-
-    selected_coords_out = [frac_coords_list[i] for i in selected_indices]
-    return selected_coords_out, selected_indices
-
-
-def insert_interstitials_ase_fast(structure_obj, interstitial_element, n_interstitials,
-                                  min_distance=2.0, grid_spacing=0.5, mode="random",
-                                  min_interstitial_distance=1.0, log_area=None, random_seed=None):
-    from pymatgen.io.ase import AseAtomsAdaptor
-    from scipy.spatial.distance import cdist
-    import random
-
-    if log_area:
-        log_area.info(f"Fast insertion: {n_interstitials} {interstitial_element} atoms...")
-        log_area.info(f"Using grid spacing: {grid_spacing}Å, min distance: {min_distance}Å, mode: {mode}")
-        log_area.info(f"Min interstitial-interstitial distance: {min_interstitial_distance}Å")
-        if random_seed is not None:
-            log_area.info(f"Random seed: {random_seed}")
-
-    new_structure = structure_obj.copy()
-
-    try:
-        ase_atoms = AseAtomsAdaptor.get_atoms(structure_obj)
-        cell = ase_atoms.get_cell()
-        positions = ase_atoms.get_positions()
-
-        cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
-        n_points = [int(length / grid_spacing) + 1 for length in cell_lengths]
-
-        if log_area:
-            log_area.write(f"Creating grid: {n_points[0]}×{n_points[1]}×{n_points[2]} = {np.prod(n_points)} points")
-
-
-        grid_points = []
-        for i in range(n_points[0]):
-            for j in range(n_points[1]):
-                for k in range(n_points[2]):
-                    frac_coord = np.array([i / n_points[0], j / n_points[1], k / n_points[2]])
-                    grid_points.append(frac_coord)
-
-        grid_points = np.array(grid_points)
-        grid_cart = np.dot(grid_points, cell.array)
-
-
-        distances = cdist(grid_cart, positions)
-        min_distances_to_atoms = np.min(distances, axis=1)
-
-        valid_indices = np.where(min_distances_to_atoms >= min_distance)[0]
-        valid_points = grid_points[valid_indices]
-        valid_points_cart = grid_cart[valid_indices]
-
-        if log_area:
-            log_area.write(f"Found {len(valid_points)} valid void sites (>{min_distance}Å from atoms)")
-
-        if len(valid_points) == 0:
-            if log_area: log_area.warning("No valid interstitial sites found with current parameters")
-            return new_structure
-
-
-        if random_seed is not None:
-            random.seed(random_seed)
-            np.random.seed(random_seed)
-
-        selected_points = []
-        selected_points_cart = []
-
-        n_to_insert = min(n_interstitials, len(valid_points))
-        if n_to_insert < n_interstitials and log_area:
-            log_area.warning(f"Only {n_to_insert} sites available, requested {n_interstitials}")
-
-        if mode == "random":
-            attempts = 0
-            max_attempts = len(valid_points) * 10
-
-            while len(selected_points) < n_to_insert and attempts < max_attempts:
-                attempts += 1
-                candidate_idx = random.randint(0, len(valid_points) - 1)
-                candidate_point = valid_points[candidate_idx]
-                candidate_point_cart = valid_points_cart[candidate_idx]
-
-                if len(selected_points_cart) == 0:
-                    selected_points.append(candidate_point)
-                    selected_points_cart.append(candidate_point_cart)
-                else:
-                    distances_to_selected = cdist([candidate_point_cart], selected_points_cart)[0]
-                    min_dist_to_selected = np.min(distances_to_selected)
-
-                    if min_dist_to_selected >= min_interstitial_distance:
-                        selected_points.append(candidate_point)
-                        selected_points_cart.append(candidate_point_cart)
-
-            if len(selected_points) < n_to_insert and log_area:
-                log_area.warning(
-                    f"Only found {len(selected_points)} sites with min interstitial distance {min_interstitial_distance}Å")
-
-        else:
-            valid_points_list = [valid_points[i] for i in range(len(valid_points))]
-            selected_points_temp, _ = select_spaced_points(valid_points_list, n_to_insert, mode, 0.5, random_seed)
-
-            selected_points = []
-            selected_points_cart = []
-
-            for point in selected_points_temp:
-                point_cart = np.dot(point, cell.array)
-
-                if len(selected_points_cart) == 0:
-                    selected_points.append(point)
-                    selected_points_cart.append(point_cart)
-                else:
-                    distances_to_selected = cdist([point_cart], selected_points_cart)[0]
-                    min_dist_to_selected = np.min(distances_to_selected)
-
-                    if min_dist_to_selected >= min_interstitial_distance:
-                        selected_points.append(point)
-                        selected_points_cart.append(point_cart)
-
-        for point in selected_points:
-            new_structure.append(
-                species=Element(interstitial_element),
-                coords=point,
-                coords_are_cartesian=False,
-                validate_proximity=False
-            )
-
-        if log_area:
-            log_area.success(
-                f"Successfully inserted {len(selected_points)} {interstitial_element} atoms using {mode} selection")
-
-    except Exception as e:
-        if log_area: log_area.error(f"Error in fast interstitial insertion: {e}")
-        return structure_obj
-
-    return new_structure
-
-
-def insert_interstitials_into_structure(structure_obj, interstitial_element, n_interstitials,
-                                        which_interstitial_type_idx=0, mode="farthest",
-                                        clustering_tol_val=0.75, min_dist_val=0.5, target_value=0.5, log_area=None,
-                                        random_seed=None):
-    from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
-
-    if log_area: log_area.info(f"Attempting to insert {n_interstitials} of {interstitial_element}...")
-    new_structure_int = structure_obj.copy()
-    try:
-        generator = VoronoiInterstitialGenerator(clustering_tol=clustering_tol_val, min_dist=min_dist_val)
-        unique_interstitial_types = list(generator.generate(new_structure_int, "H"))
-        if not unique_interstitial_types:
-            if log_area: log_area.warning("VoronoiInterstitialGenerator found no candidate sites.")
-            return new_structure_int
-        if log_area:
-            log_area.write(f"Found {len(unique_interstitial_types)} unique interstitial site types.")
-            for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
-                site_label = classify_interstitial_site(new_structure_int, interstitial_type_obj.site.frac_coords)
-                log_area.write(
-                    f"  Type {i_type + 1}: at {np.round(interstitial_type_obj.site.frac_coords, 3)}, {site_label}, with {len(interstitial_type_obj.equivalent_sites)} equivalent sites.")
-
-        frac_coords_to_consider = []
-        if which_interstitial_type_idx == 0:
-            for interstitial_type_obj in unique_interstitial_types:
-                for eq_site in interstitial_type_obj.equivalent_sites:
-                    frac_coords_to_consider.append(eq_site.frac_coords)
-        elif 0 < which_interstitial_type_idx <= len(unique_interstitial_types):
-            interstitial_type_obj = unique_interstitial_types[which_interstitial_type_idx - 1]
-            for eq_site in interstitial_type_obj.equivalent_sites:
-                frac_coords_to_consider.append(eq_site.frac_coords)
-            if log_area: log_area.info(
-                f"Focusing on interstitial type {which_interstitial_type_idx} ({len(frac_coords_to_consider)} sites).")
-        else:
-            if log_area: log_area.warning(
-                f"Invalid interstitial type index: {which_interstitial_type_idx}. Max is {len(unique_interstitial_types)}. Using no sites.")
-            return new_structure_int
-
-        if not frac_coords_to_consider:
-            if log_area: log_area.warning("No interstitial sites available to select from based on criteria.")
-            return new_structure_int
-
-        num_to_actually_insert = min(n_interstitials, len(frac_coords_to_consider))
-        if num_to_actually_insert < n_interstitials and log_area:
-            log_area.warning(
-                f"Requested {n_interstitials} interstitials, but only {num_to_actually_insert} sites are available. Inserting {num_to_actually_insert}.")
-
-        if num_to_actually_insert > 0:
-            selected_points_coords, _ = select_spaced_points(frac_coords_to_consider, num_to_actually_insert, mode,
-                                                             target_value, random_seed)
-
-            if log_area: log_area.info(
-                f"Selected {len(selected_points_coords)} sites out of {len(frac_coords_to_consider)} available sites.")
-
-            for point_coords in selected_points_coords:
-                new_structure_int.append(
-                    species=Element(interstitial_element),
-                    coords=point_coords,
-                    coords_are_cartesian=False,
-                    validate_proximity=True
-                )
-            if log_area: log_area.info(
-                f"Successfully inserted {len(selected_points_coords)} {interstitial_element} atoms.")
-        else:
-            if log_area: log_area.info("No interstitials were inserted based on parameters.")
-    except Exception as e_int:
-        if log_area: log_area.error(f"Error during interstitial insertion: {e_int}")
-    return new_structure_int
-
-
-def remove_vacancies_from_structure(structure_obj, vacancy_percentages_dict, selection_mode_vac="farthest",
-                                    target_value_vac=0.5, log_area=None, random_seed=None):
-    if random_seed is not None:
-        import random
-        random.seed(random_seed)
-        np.random.seed(random_seed)
-
-    if log_area: log_area.info(f"Attempting to create vacancies...")
-    new_structure_vac = structure_obj.copy()
-    indices_to_remove_overall = []
-    for el_symbol, perc_to_remove in vacancy_percentages_dict.items():
-        if perc_to_remove <= 0: continue
-        el_indices_in_struct = [i for i, site in enumerate(new_structure_vac.sites) if
-                                site.specie and site.specie.symbol == el_symbol]
-        n_sites_of_el = len(el_indices_in_struct)
-        n_to_remove_for_el = int(round(n_sites_of_el * perc_to_remove / 100.0))
-        if log_area: log_area.write(
-            f"  For element {el_symbol}: Found {n_sites_of_el} sites. Requested to remove {perc_to_remove}% ({n_to_remove_for_el} atoms).")
-        if n_to_remove_for_el == 0: continue
-        if n_to_remove_for_el > n_sites_of_el:
-            if log_area: log_area.warning(
-                f"    Cannot remove {n_to_remove_for_el} atoms of {el_symbol}, only {n_sites_of_el} exist. Removing all.")
-            n_to_remove_for_el = n_sites_of_el
-        el_frac_coords = [new_structure_vac.sites[i].frac_coords for i in el_indices_in_struct]
-        if not el_frac_coords and n_to_remove_for_el > 0:
-            if log_area: log_area.warning(f"    No coordinates found for {el_symbol} to select from.")
-            continue
-        _, selected_local_indices_for_removal = select_spaced_points(el_frac_coords, n_to_remove_for_el,
-                                                                     selection_mode_vac, target_value_vac, random_seed)
-        global_indices_for_this_el_removal = [el_indices_in_struct[i] for i in selected_local_indices_for_removal]
-        indices_to_remove_overall.extend(global_indices_for_this_el_removal)
-        if log_area: log_area.write(
-            f"    Selected {len(global_indices_for_this_el_removal)} sites of {el_symbol} for removal.")
-    if indices_to_remove_overall:
-        unique_indices_to_remove = sorted(list(set(indices_to_remove_overall)), reverse=True)
-        new_structure_vac.remove_sites(unique_indices_to_remove)
-        if log_area: log_area.info(f"Attempted to remove {len(unique_indices_to_remove)} atoms in total.")
-    else:
-        if log_area: log_area.info("No atoms were selected for vacancy creation.")
-    return new_structure_vac
-
-
-def substitute_atoms_in_structure(structure_obj, substitution_settings_dict, selection_mode_sub="farthest",
-                                  target_value_sub=0.5, log_area=None, random_seed=None):
-    if random_seed is not None:
-        import random
-        random.seed(random_seed)
-        np.random.seed(random_seed)
-
-    if log_area: log_area.info(f"Attempting substitutions...")
-    new_species_list = [site.species for site in structure_obj.sites]
-    new_coords_list = [site.frac_coords for site in structure_obj.sites]
-    modified_indices_count = 0
-    for orig_el_symbol, settings in substitution_settings_dict.items():
-        perc_to_sub = settings.get("percentage", 0)
-        sub_el_symbol = settings.get("substitute", "").strip()
-        if perc_to_sub <= 0 or not sub_el_symbol: continue
-        try:
-            sub_element = Element(sub_el_symbol)
-        except Exception:
-            if log_area: log_area.warning(
-                f"  Invalid substitute element symbol: '{sub_el_symbol}'. Skipping for {orig_el_symbol}.")
-            continue
-        orig_el_indices_in_struct = [i for i, site in enumerate(structure_obj.sites) if
-                                     site.specie and site.specie.symbol == orig_el_symbol]
-        n_sites_of_orig_el = len(orig_el_indices_in_struct)
-        n_to_sub_for_el = int(round(n_sites_of_orig_el * perc_to_sub / 100.0))
-        if log_area: log_area.write(
-            f"  For {orig_el_symbol} -> {sub_el_symbol}: Found {n_sites_of_orig_el} sites of {orig_el_symbol}. Requested to substitute {perc_to_sub}% ({n_to_sub_for_el} atoms).")
-        if n_to_sub_for_el == 0: continue
-        if n_to_sub_for_el > n_sites_of_orig_el:
-            if log_area: log_area.warning(
-                f"    Cannot substitute {n_to_sub_for_el} atoms of {orig_el_symbol}, only {n_sites_of_orig_el} exist. Substituting all.")
-            n_to_sub_for_el = n_sites_of_orig_el
-        orig_el_frac_coords = [structure_obj.sites[i].frac_coords for i in orig_el_indices_in_struct]
-        if not orig_el_frac_coords and n_to_sub_for_el > 0:
-            if log_area: log_area.warning(f"    No coordinates found for {orig_el_symbol} to select from.")
-            continue
-        _, selected_local_indices_for_substitution = select_spaced_points(orig_el_frac_coords, n_to_sub_for_el,
-                                                                          selection_mode_sub, target_value_sub,
-                                                                          random_seed)
-        global_indices_for_this_el_substitution = [orig_el_indices_in_struct[i] for i in
-                                                   selected_local_indices_for_substitution]
-        for global_idx_to_sub in global_indices_for_this_el_substitution:
-            new_species_list[global_idx_to_sub] = sub_element
-            modified_indices_count += 1
-        if log_area: log_area.write(
-            f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for substitution with {sub_el_symbol}.")
-    if modified_indices_count > 0:
-        final_substituted_structure = Structure(lattice=structure_obj.lattice, species=new_species_list,
-                                                coords=new_coords_list, coords_are_cartesian=False)
-        if log_area: log_area.info(f"Attempted to substitute {modified_indices_count} atoms in total.")
-        return final_substituted_structure
-    else:
-        if log_area: log_area.info("No atoms were selected for substitution.")
-        return structure_obj.copy()
-
-
 def get_orthogonal_cell(structure, max_atoms=200):
     from pymatgen.transformations.advanced_transformations import CubicSupercellTransformation
 
@@ -1987,13 +1504,13 @@ if st.session_state.uploaded_files:
 
         sc_col1, sc_col2, sc_col3 = st.columns(3)
         with sc_col1:
-            n_a_ui = st.number_input("Repeat a", 1, 10, st.session_state.supercell_n_a, 1, key="sc_a",
+            n_a_ui = st.number_input("Repeat a", 1, 30, st.session_state.supercell_n_a, 1, key="sc_a",
                                      disabled=supercell_applied_locally)
         with sc_col2:
-            n_b_ui = st.number_input("Repeat b", 1, 10, st.session_state.supercell_n_b, 1, key="sc_b",
+            n_b_ui = st.number_input("Repeat b", 1, 30, st.session_state.supercell_n_b, 1, key="sc_b",
                                      disabled=supercell_applied_locally)
         with sc_col3:
-            n_c_ui = st.number_input("Repeat c", 1, 10, st.session_state.supercell_n_c, 1, key="sc_c",
+            n_c_ui = st.number_input("Repeat c", 1, 30, st.session_state.supercell_n_c, 1, key="sc_c",
                                      disabled=supercell_applied_locally)
 
         base_atoms_sc_info = len(st.session_state.represented_structure)
@@ -2477,145 +1994,179 @@ if st.session_state.uploaded_files:
                 "Supercell not yet applied. Please apply supercell dimensions in Step 2 before creating defects.")
 
         st.markdown("---")
+        st.markdown("---")
         st.markdown("### 🔬 Structure Visualization & Download")
         pmg_to_visualize = st.session_state.current_structure
         if pmg_to_visualize:
-            ase_to_visualize = AseAtomsAdaptor.get_atoms(pmg_to_visualize)
-            col_viz, col_dl = st.columns([2, 1])
-            with col_viz:
-                show_3d = st.checkbox("Show 3D Visualization",
-                                      value=st.session_state.show_3d_visualization,
-                                      key="show_3d_cb_main")
-                if show_3d != st.session_state.show_3d_visualization:
-                    st.session_state.show_3d_visualization = show_3d
+            total_atoms = len(pmg_to_visualize)
 
-                show_labels = st.checkbox("Show atomic labels",
-                                          value=st.session_state.show_atomic_labels,
-                                          key="show_labels_cb_main")
-                if show_labels != st.session_state.show_atomic_labels:
-                    st.session_state.show_atomic_labels = show_labels
+            if total_atoms < 500:
+                # Show full visualization and structure info for structures with < 500 atoms
+                ase_to_visualize = AseAtomsAdaptor.get_atoms(pmg_to_visualize)
+                col_viz, col_dl = st.columns([2, 1])
 
-                if st.session_state.show_3d_visualization:
-                    xyz_io = StringIO()
-                    write(xyz_io, ase_to_visualize, format="xyz")
-                    xyz_str = xyz_io.getvalue()
-                    view = py3Dmol.view(width=600, height=500)
-                    view.addModel(xyz_str, "xyz")
-                    view.setStyle({'model': 0}, {"sphere": {"radius": 0.3, "colorscheme": "Jmol"}})
-                    cell_viz = ase_to_visualize.get_cell()
-                    if np.linalg.det(cell_viz) > 1e-6:
-                        add_box(view, cell_viz, color='black', linewidth=1.5)
-                    if st.session_state.show_atomic_labels:
-                        for i, atom in enumerate(ase_to_visualize):
-                            view.addLabel(f"{atom.symbol}{i}", {
-                                "position": {"x": atom.position[0], "y": atom.position[1], "z": atom.position[2]},
-                                "backgroundColor": "white", "fontColor": "black", "fontSize": 10,
-                                "borderThickness": 0.5, "borderColor": "grey"})
-                    view.zoomTo()
-                    view.zoom(1.1)
-                    html_viz = view._make_html()
-                    st.components.v1.html(
-                        f"<div style='display:flex;justify-content:center;border:1px solid #e0e0e0;border-radius:5px;overflow:hidden;min-height:510px;'>{html_viz}</div>",
-                        height=520)
+                with col_viz:
+                    show_3d = st.checkbox("Show 3D Visualization",
+                                          value=st.session_state.show_3d_visualization,
+                                          key="show_3d_cb_main")
+                    if show_3d != st.session_state.show_3d_visualization:
+                        st.session_state.show_3d_visualization = show_3d
 
-                    elems_legend = sorted(list(set(ase_to_visualize.get_chemical_symbols())))
-                    legend_items = [
-                        f"<div style='margin-right:10px;display:flex;align-items:center;'><div style='width:15px;height:15px;background-color:{jmol_colors.get(e, '#CCCCCC')};margin-right:5px;border:1px solid black;'></div><span>{e}</span></div>"
-                        for e in elems_legend]
+                    show_labels = st.checkbox("Show atomic labels",
+                                              value=st.session_state.show_atomic_labels,
+                                              key="show_labels_cb_main")
+                    if show_labels != st.session_state.show_atomic_labels:
+                        st.session_state.show_atomic_labels = show_labels
+
+                    if st.session_state.show_3d_visualization:
+                        xyz_io = StringIO()
+                        write(xyz_io, ase_to_visualize, format="xyz")
+                        xyz_str = xyz_io.getvalue()
+                        view = py3Dmol.view(width=600, height=500)
+                        view.addModel(xyz_str, "xyz")
+                        view.setStyle({'model': 0}, {"sphere": {"radius": 0.3, "colorscheme": "Jmol"}})
+                        cell_viz = ase_to_visualize.get_cell()
+                        if np.linalg.det(cell_viz) > 1e-6:
+                            add_box(view, cell_viz, color='black', linewidth=1.5)
+                        if st.session_state.show_atomic_labels:
+                            for i, atom in enumerate(ase_to_visualize):
+                                view.addLabel(f"{atom.symbol}{i}", {
+                                    "position": {"x": atom.position[0], "y": atom.position[1], "z": atom.position[2]},
+                                    "backgroundColor": "white", "fontColor": "black", "fontSize": 10,
+                                    "borderThickness": 0.5, "borderColor": "grey"})
+                        view.zoomTo()
+                        view.zoom(1.1)
+                        html_viz = view._make_html()
+                        st.components.v1.html(
+                            f"<div style='display:flex;justify-content:center;border:1px solid #e0e0e0;border-radius:5px;overflow:hidden;min-height:510px;'>{html_viz}</div>",
+                            height=520)
+
+                        elems_legend = sorted(list(set(ase_to_visualize.get_chemical_symbols())))
+                        legend_items = [
+                            f"<div style='margin-right:10px;display:flex;align-items:center;'><div style='width:15px;height:15px;background-color:{jmol_colors.get(e, '#CCCCCC')};margin-right:5px;border:1px solid black;'></div><span>{e}</span></div>"
+                            for e in elems_legend]
+                        st.markdown(
+                            f"<div style='display:flex;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:10px;'>{''.join(legend_items)}</div>",
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            "<div style='display:flex;justify-content:center;align-items:center;border:1px solid #e0e0e0;border-radius:5px;height:520px;background-color:#f8f9fa;'>"
+                            "<p style='color:#666;font-style:italic;'>3D visualization is disabled. Check the box above to enable it.</p>"
+                            "</div>",
+                            unsafe_allow_html=True
+                        )
+
+                with col_dl:
+                    st.markdown("##### Structure Info")
+                    cp = ase_to_visualize.get_cell_lengths_and_angles()
+                    vol = ase_to_visualize.get_volume()
+
+                    element_counts = {}
+                    for atom in ase_to_visualize:
+                        element = atom.symbol
+                        element_counts[element] = element_counts.get(element, 0) + 1
+
+                    st.markdown(f"<b>Total Atoms:</b> {total_atoms}", unsafe_allow_html=True)
+
+                    element_info_lines = []
+                    for element, count in sorted(element_counts.items()):
+                        percentage = (count / total_atoms) * 100
+                        element_info_lines.append(f"{element}: {count} ({percentage:.1f}%)")
+
+                    element_info_text = "<br>".join(element_info_lines)
+                    st.markdown(f"<b>Composition:</b><br>{element_info_text}", unsafe_allow_html=True)
+
                     st.markdown(
-                        f"<div style='display:flex;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:10px;'>{''.join(legend_items)}</div>",
+                        f"a={cp[0]:.4f} Å b={cp[1]:.4f} Å c={cp[2]:.4f} Å<br>α={cp[3]:.2f}° β={cp[4]:.2f}° γ={cp[5]:.2f}°<br>Vol={vol:.2f} Å³",
                         unsafe_allow_html=True)
-                else:
-                    st.markdown(
-                        "<div style='display:flex;justify-content:center;align-items:center;border:1px solid #e0e0e0;border-radius:5px;height:520px;background-color:#f8f9fa;'>"
-                        "<p style='color:#666;font-style:italic;'>3D visualization is disabled. Check the box above to enable it.</p>"
-                        "</div>",
-                        unsafe_allow_html=True
-                    )
 
-            with col_dl:
-                st.markdown("##### Structure Info")
-                cp = ase_to_visualize.get_cell_lengths_and_angles()
-                vol = ase_to_visualize.get_volume()
+                    if len(pmg_to_visualize) < 500:
+                        try:
+                            spg_info = get_cached_space_group_info(pmg_to_visualize)
+                            st.markdown(
+                                f"<b>Space Group:</b> {spg_info['symbol']} ({spg_info['number']})",
+                                unsafe_allow_html=True)
+                        except Exception:
+                            st.markdown("<b>Space Group:</b> N/A or low symmetry", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<b>Space Group:</b> Skipped (>500 atoms)", unsafe_allow_html=True)
 
-                total_atoms = len(ase_to_visualize)
-                element_counts = {}
-                for atom in ase_to_visualize:
-                    element = atom.symbol
-                    element_counts[element] = element_counts.get(element, 0) + 1
+                if st.session_state.show_atomic_labels and st.session_state.show_3d_visualization:
+                    atom_info_data = []
+                    inv_cell_tbl = np.eye(3)
+                    det_cell = np.linalg.det(cell_viz)
+                    if det_cell > 1e-9: inv_cell_tbl = np.linalg.inv(cell_viz)
+                    for i, atom in enumerate(ase_to_visualize):
+                        pos, frac = atom.position, np.dot(atom.position, inv_cell_tbl)
+                        atom_info_data.append(
+                            {"Atom": f"{atom.symbol}{i}", "X": f"{pos[0]:.3f}", "Y": f"{pos[1]:.3f}",
+                             "Z": f"{pos[2]:.3f}",
+                             "Frac X": f"{frac[0]:.3f}", "Frac Y": f"{frac[1]:.3f}", "Frac Z": f"{frac[2]:.3f}"})
+                    if atom_info_data:
+                        st.markdown("##### Atomic Positions")
+                        st.dataframe(pd.DataFrame(atom_info_data), height=200)
+            else:
+                # For structures with >= 500 atoms, show warning and only download options
+                st.warning(
+                    f"⚠️ Structure has {total_atoms} atoms (≥500). Visualization disabled for performance. Download options available below.")
+                ase_to_visualize = AseAtomsAdaptor.get_atoms(pmg_to_visualize)
 
-                st.markdown(f"<b>Total Atoms:</b> {total_atoms}", unsafe_allow_html=True)
+            # Download section (shown for all structures regardless of size)
+            st.markdown("##### Download Options")
+            fmt_dl = st.radio("Format", ("CIF", "VASP", "LAMMPS", "XYZ"), horizontal=True, key="dl_fmt_radio")
+            base_fn_dl = st.session_state.selected_file.split('.')[0] if st.session_state.selected_file else "custom"
+            applied_cell_fn = st.session_state.applied_cell_type_name
+            sc_factors_fn = f"SC{st.session_state.applied_supercell_n_a}x{st.session_state.applied_supercell_n_b}x{st.session_state.applied_supercell_n_c}"
+            suffix_fn = f"{applied_cell_fn}_{sc_factors_fn}" if st.session_state.supercell_settings_applied else applied_cell_fn
 
-                element_info_lines = []
-                for element, count in sorted(element_counts.items()):
-                    percentage = (count / total_atoms) * 100
-                    element_info_lines.append(f"{element}: {count} ({percentage:.1f}%)")
+            # Show format-specific options without generating content
+            if fmt_dl == "VASP":
+                colsss, colyyy = st.columns([1, 1])
+                with colsss:
+                    use_fractional = st.checkbox("Output POSCAR with fractional coordinates", value=True,
+                                                 key="poscar_fractional")
+                with colyyy:
+                    use_selective_dynamics = st.checkbox("Include Selective dynamics (all atoms free)", value=False,
+                                                         key="poscar_sd")
+            elif fmt_dl == "LAMMPS":
+                st.markdown("**LAMMPS Export Options**")
+                lmp_col1, lmp_col2 = st.columns(2)
+                with lmp_col1:
+                    atom_style = st.selectbox("Select atom_style", ["atomic", "charge", "full"], index=0,
+                                              key="lmp_style_dl")
+                    units = st.selectbox("Select units", ["metal", "real", "si"], index=0, key="lmp_units_dl")
+                with lmp_col2:
+                    include_masses = st.checkbox("Include atomic masses", value=True, key="lmp_masses_dl")
+                    force_skew = st.checkbox("Force triclinic cell (skew)", value=False, key="lmp_skew_dl")
 
-                element_info_text = "<br>".join(element_info_lines)
-                st.markdown(f"<b>Composition:</b><br>{element_info_text}", unsafe_allow_html=True)
-
-                st.markdown(
-                    f"a={cp[0]:.4f} Å b={cp[1]:.4f} Å c={cp[2]:.4f} Å<br>α={cp[3]:.2f}° β={cp[4]:.2f}° γ={cp[5]:.2f}°<br>Vol={vol:.2f} Å³",
-                    unsafe_allow_html=True)
-
-                try:
-                    sga = SpacegroupAnalyzer(pmg_to_visualize, symprec=0.1)
-                    st.markdown(
-                        f"<b>Space Group:</b> {sga.get_space_group_symbol()} ({sga.get_space_group_number()})",
-                        unsafe_allow_html=True)
-                except Exception:
-                    st.markdown("<b>Space Group:</b> N/A or low symmetry", unsafe_allow_html=True)
-
-                st.markdown("##### Download Options")
-                fmt_dl = st.radio("Format", ("CIF", "VASP", "LAMMPS", "XYZ"), horizontal=True, key="dl_fmt_radio")
-                base_fn_dl = st.session_state.selected_file.split('.')[
-                    0] if st.session_state.selected_file else "custom"
-                applied_cell_fn = st.session_state.applied_cell_type_name
-                sc_factors_fn = f"SC{st.session_state.applied_supercell_n_a}x{st.session_state.applied_supercell_n_b}x{st.session_state.applied_supercell_n_c}"
-                suffix_fn = f"{applied_cell_fn}_{sc_factors_fn}" if st.session_state.supercell_settings_applied else applied_cell_fn
-
-                dl_content, dl_name, dl_mime = None, "structure", "text/plain"
+            # Only generate content when download button is pressed
+            if st.button(f"Download {fmt_dl}", type="primary", key=f"dl_btn_{fmt_dl}"):
                 try:
                     if fmt_dl == "CIF":
                         dl_content = str(CifWriter(pmg_to_visualize, symprec=0.1, refine_struct=False))
                         dl_name = f"{base_fn_dl}_{suffix_fn}.cif"
                         dl_mime = "chemical/x-cif"
+
                     elif fmt_dl == "VASP":
-                        sio = StringIO()
-                        colsss, colyyy = st.columns([1, 1])
-                        with colsss:
-                            use_fractional = st.checkbox("Output POSCAR with fractional coordinates",
-                                                         value=True,
-                                                         key="poscar_fractional")
-                        with colyyy:
+                        if use_selective_dynamics:
                             from ase.constraints import FixAtoms
 
-                            use_selective_dynamics = st.checkbox("Include Selective dynamics (all atoms free)",
-                                                                 value=False, key="poscar_sd")
-                            if use_selective_dynamics:
-                                constraint = FixAtoms(indices=[])
-                                ase_to_visualize.set_constraint(constraint)
+                            ase_to_visualize.set_constraint(FixAtoms(indices=[]))
 
-                        write(sio, ase_to_visualize, format="vasp",
-                              direct=use_fractional, sort=True)
+                        sio = StringIO()
+                        write(sio, ase_to_visualize, format="vasp", direct=use_fractional, sort=True)
                         dl_content = sio.getvalue()
                         dl_name = f"{base_fn_dl}_{suffix_fn}.poscar"
-                    elif fmt_dl == "LAMMPS":
-                        st.markdown("**LAMMPS Export Options**")
-                        lmp_col1, lmp_col2 = st.columns(2)
-                        with lmp_col1:
-                            atom_style = st.selectbox("Select atom_style", ["atomic", "charge", "full"], index=0,
-                                                      key="lmp_style_dl")
-                            units = st.selectbox("Select units", ["metal", "real", "si"], index=0, key="lmp_units_dl")
-                        with lmp_col2:
-                            include_masses = st.checkbox("Include atomic masses", value=True, key="lmp_masses_dl")
-                            force_skew = st.checkbox("Force triclinic cell (skew)", value=False, key="lmp_skew_dl")
+                        dl_mime = "text/plain"
 
+                    elif fmt_dl == "LAMMPS":
                         sio = StringIO()
                         write(sio, ase_to_visualize, format="lammps-data",
                               atom_style=atom_style, units=units, masses=include_masses, force_skew=force_skew)
                         dl_content = sio.getvalue()
                         dl_name = f"{base_fn_dl}_{suffix_fn}_{atom_style}.lmp"
+                        dl_mime = "text/plain"
+
                     elif fmt_dl == "XYZ":
                         lattice_vectors = pmg_to_visualize.lattice.matrix
                         cart_coords = []
@@ -2624,41 +2175,30 @@ if st.session_state.uploaded_files:
                             cart_coords.append(pmg_to_visualize.lattice.get_cartesian_coords(site.frac_coords))
                             elements.append(site.specie.symbol)
 
-                        xyz_lines = []
-                        xyz_lines.append(str(len(pmg_to_visualize)))
-
+                        xyz_lines = [str(len(pmg_to_visualize))]
                         lattice_string = " ".join([f"{x:.6f}" for row in lattice_vectors for x in row])
                         properties = "Properties=species:S:1:pos:R:3"
-                        comment_line = f'Lattice="{lattice_string}" {properties}'
-                        xyz_lines.append(comment_line)
+                        xyz_lines.append(f'Lattice="{lattice_string}" {properties}')
 
                         for element, coord in zip(elements, cart_coords):
-                            line = f"{element} {coord[0]:.6f} {coord[1]:.6f} {coord[2]:.6f}"
-                            xyz_lines.append(line)
+                            xyz_lines.append(f"{element} {coord[0]:.6f} {coord[1]:.6f} {coord[2]:.6f}")
 
                         dl_content = "\n".join(xyz_lines)
                         dl_name = f"{base_fn_dl}_{suffix_fn}.xyz"
                         dl_mime = "chemical/x-xyz"
 
-                    if dl_content:
-                        st.download_button(f"Download {fmt_dl}", dl_content, dl_name, dl_mime,
-                                           type="primary", key=f"dl_btn_{fmt_dl}")
+                    # Trigger download
+                    st.download_button(
+                        label=f"💾 Save {fmt_dl} File",
+                        data=dl_content,
+                        file_name=dl_name,
+                        mime=dl_mime,
+                        key=f"actual_download_{fmt_dl}"
+                    )
+
                 except Exception as e_dl:
                     st.error(f"Error generating {fmt_dl}: {e_dl}")
 
-            if st.session_state.show_atomic_labels and st.session_state.show_3d_visualization:
-                atom_info_data = []
-                inv_cell_tbl = np.eye(3)
-                det_cell = np.linalg.det(cell_viz)
-                if det_cell > 1e-9: inv_cell_tbl = np.linalg.inv(cell_viz)
-                for i, atom in enumerate(ase_to_visualize):
-                    pos, frac = atom.position, np.dot(atom.position, inv_cell_tbl)
-                    atom_info_data.append(
-                        {"Atom": f"{atom.symbol}{i}", "X": f"{pos[0]:.3f}", "Y": f"{pos[1]:.3f}", "Z": f"{pos[2]:.3f}",
-                         "Frac X": f"{frac[0]:.3f}", "Frac Y": f"{frac[1]:.3f}", "Frac Z": f"{frac[2]:.3f}"})
-                if atom_info_data:
-                    st.markdown("##### Atomic Positions")
-                    st.dataframe(pd.DataFrame(atom_info_data), height=200)
         else:
             st.warning("No structure available for visualization. Upload/select a file.")
     else:
@@ -2677,10 +2217,10 @@ def get_memory_usage():
     return mem_info.rss / (1024 ** 2)  # in MB
 
 
-memory_usage = get_memory_usage()
-st.write(
-    f"🔍 Current memory usage: **{memory_usage:.2f} MB**. We are now using free hosting by Streamlit Community Cloud servis, which has a limit for RAM memory of 2.6 GBs. For more extensive computations, please compile the application locally from the [GitHub](https://github.com/bracerino/xrdlicious).")
-
+#memory_usage = get_memory_usage()
+#st.write(
+#    f"🔍 Current memory usage: **{memory_usage:.2f} MB**. We are now using free hosting by Streamlit Community Cloud servis, which has a limit for RAM memory of 2.6 GBs. For more extensive computations, please compile the application locally from the [GitHub](https://github.com/bracerino/xrdlicious).")
+#
 st.markdown("""
 
 ### Acknowledgments
