@@ -13,7 +13,7 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
+import time
 from helpers_defects import *
 
 import numpy as np
@@ -128,21 +128,34 @@ def get_structure_info(structure):
 
 st.markdown("""
     <style>
-    div.stButton > button {
+    div.stButton > button[kind="primary"] {
         background-color: #0099ff; color: white; font-size: 16px; font-weight: bold;
         padding: 0.5em 1em; border: none; border-radius: 5px; height: 3em; width: 100%;
     }
-    div.stButton > button:active, div.stButton > button:focus {
+    div.stButton > button[kind="primary"]:active, div.stButton > button[kind="primary"]:focus {
         background-color: #007acc !important; color: white !important; box-shadow: none !important;
     }
+
+    div.stButton > button[kind="secondary"] {
+        background-color: #dc3545; color: white; font-size: 16px; font-weight: bold;
+        padding: 0.5em 1em; border: none; border-radius: 5px; height: 3em; width: 100%;
+    }
+    div.stButton > button[kind="secondary"]:active, div.stButton > button[kind="secondary"]:focus {
+        background-color: #c82333 !important; color: white !important; box-shadow: none !important;
+    }
+
+    div.stButton > button[kind="tertiary"] {
+        background-color: #6f42c1; color: white; font-size: 16px; font-weight: bold;
+        padding: 0.5em 1em; border: none; border-radius: 5px; height: 3em; width: 100%;
+    }
+    div.stButton > button[kind="tertiary"]:active, div.stButton > button[kind="tertiary"]:focus {
+        background-color: #5a2d91 !important; color: white !important; box-shadow: none !important;
+    }
+
     div[data-testid="stDataFrameContainer"] table td { font-size: 16px !important; }
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
-
-components.html("""
-    <head><meta name="description" content="XRDlicious submodule: Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR, ...)"></head>
-    """, height=0)
 
 st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR, ...)")
 col1_header, col2_header = st.columns([1.25, 1])
@@ -1205,53 +1218,59 @@ if st.session_state.uploaded_files:
 
         col_checkbox, col_info = st.columns([1, 1])
 
-        with col_checkbox:
-            customize_cell = st.checkbox(
-                "Customize Cell Representation (default is Conventional)",
-                value=st.session_state.change_cell_representation_checkbox,
-                key="cell_rep_checkbox",
-                help="Check this box to choose a cell representation other than the default conventional cell."
-            )
+        #with col_checkbox:
+        #    customize_cell = st.checkbox(
+        #        "Customize Cell Representation (default is Conventional)",
+        #        value=st.session_state.change_cell_representation_checkbox,
+        #        key="cell_rep_checkbox_stable",
+        #        help="Check this box to choose a cell representation other than the default conventional cell."
+        #    )
+           # customize_cell = st.checkbox(
+           #     "Customize Cell Representation (default is Conventional)",
+           #     value=st.session_state.change_cell_representation_checkbox,
+           #     key="cell_rep_checkbox_ui",
+           #     help="Check this box to choose a cell representation other than the default conventional cell."
+           # )
 
-        if customize_cell != st.session_state.change_cell_representation_checkbox:
-            st.session_state.change_cell_representation_checkbox = customize_cell
-            if not customize_cell:
-                if st.session_state.current_cell_representation_type != "Conventional Cell":
-                    set_default_conventional_representation()
-                    st.rerun()
+        #if customize_cell != st.session_state.change_cell_representation_checkbox:
+        #    st.session_state.change_cell_representation_checkbox = customize_cell
+        #    if not customize_cell:
+        #        if st.session_state.current_cell_representation_type != "Conventional Cell":
+        #            set_default_conventional_representation()
+        #            st.rerun()
 
-        if st.session_state.change_cell_representation_checkbox:
-            current_rep_type_idx = CELL_REPRESENTATION_OPTIONS.index(st.session_state.current_cell_representation_type) \
-                if st.session_state.current_cell_representation_type in CELL_REPRESENTATION_OPTIONS else 0
+        #if st.session_state.change_cell_representation_checkbox:
+        current_rep_type_idx = CELL_REPRESENTATION_OPTIONS.index(st.session_state.current_cell_representation_type) \
+            if st.session_state.current_cell_representation_type in CELL_REPRESENTATION_OPTIONS else 0
 
-            selected_representation_type_ui = st.radio(
-                "Choose cell type:", options=CELL_REPRESENTATION_OPTIONS, index=current_rep_type_idx,
-                key="cell_rep_radio", horizontal=True
-            )
+        selected_representation_type_ui = st.radio(
+            "Choose cell type:", options=CELL_REPRESENTATION_OPTIONS, index=current_rep_type_idx,
+            key="cell_rep_radio", horizontal=True
+        )
 
-            if selected_representation_type_ui != st.session_state.current_cell_representation_type:
-                if st.session_state.active_original_structure:
-                    base_for_rep = st.session_state.active_original_structure.copy()
-                    try:
-                        _analyzer = SpacegroupAnalyzer(base_for_rep, symprec=0.1)
-                        if selected_representation_type_ui == "Conventional Cell":
-                            preview_structure = _analyzer.get_conventional_standard_structure()
-                        elif selected_representation_type_ui == "Primitive Cell (Niggli)":
-                            preview_structure = _analyzer.get_primitive_standard_structure().get_reduced_structure(
-                                reduction_algo="niggli")
-                        elif selected_representation_type_ui == "Primitive Cell (LLL)":
-                            preview_structure = _analyzer.get_primitive_standard_structure().get_reduced_structure(
-                                reduction_algo="LLL")
-                        elif selected_representation_type_ui == "Primitive Cell (no reduction)":
-                            preview_structure = _analyzer.get_primitive_standard_structure()
-                        elif selected_representation_type_ui == "Orthogonal Cell":
-                            preview_structure = get_orthogonal_cell(base_for_rep)
+        if selected_representation_type_ui != st.session_state.current_cell_representation_type:
+            if st.session_state.active_original_structure:
+                base_for_rep = st.session_state.active_original_structure.copy()
+                try:
+                    _analyzer = SpacegroupAnalyzer(base_for_rep, symprec=0.1)
+                    if selected_representation_type_ui == "Conventional Cell":
+                        preview_structure = _analyzer.get_conventional_standard_structure()
+                    elif selected_representation_type_ui == "Primitive Cell (Niggli)":
+                        preview_structure = _analyzer.get_primitive_standard_structure().get_reduced_structure(
+                            reduction_algo="niggli")
+                    elif selected_representation_type_ui == "Primitive Cell (LLL)":
+                        preview_structure = _analyzer.get_primitive_standard_structure().get_reduced_structure(
+                            reduction_algo="LLL")
+                    elif selected_representation_type_ui == "Primitive Cell (no reduction)":
+                        preview_structure = _analyzer.get_primitive_standard_structure()
+                    elif selected_representation_type_ui == "Orthogonal Cell":
+                        preview_structure = get_orthogonal_cell(base_for_rep)
 
-                        st.session_state.preview_structure = preview_structure
-                    except Exception as e_preview:
-                        st.error(
-                            f"Error previewing cell representation '{selected_representation_type_ui}': {e_preview}")
-                        st.session_state.preview_structure = None
+                    st.session_state.preview_structure = preview_structure
+                except Exception as e_preview:
+                    st.error(
+                        f"Error previewing cell representation '{selected_representation_type_ui}': {e_preview}")
+                    st.session_state.preview_structure = None
 
             with col_info:
                 if st.session_state.preview_structure:
@@ -1259,7 +1278,7 @@ if st.session_state.uploaded_files:
                     preview_info = get_structure_info(st.session_state.preview_structure)
                     st.markdown(preview_info)
 
-            if st.button("Apply Selected Cell Representation", key="apply_cell_rep_btn"):
+            if st.button("Apply Selected Cell Representation", key="apply_cell_rep_btn", type = 'primary'):
                 if st.session_state.preview_structure:
                     st.session_state.represented_structure = st.session_state.preview_structure.copy()
                     st.session_state.current_structure = st.session_state.preview_structure.copy()
@@ -1466,7 +1485,7 @@ if st.session_state.uploaded_files:
                             st.text_input("γ (°)", value=f"{float(current_lattice.gamma):.5f}", disabled=True)
                             new_gamma = current_lattice.gamma
 
-                if st.button("Apply Lattice Changes", key="apply_lattice_changes"):
+                if st.button("Apply Lattice Changes", key="apply_lattice_changes", type = 'primary'):
                     try:
                         from pymatgen.core import Lattice
 
@@ -1519,7 +1538,7 @@ if st.session_state.uploaded_files:
 
         apply_sc_col, reset_sc_col = st.columns(2)
         with apply_sc_col:
-            if st.button("Apply Supercell", disabled=supercell_applied_locally, key="apply_supercell_btn"):
+            if st.button("Apply Supercell", disabled=supercell_applied_locally, key="apply_supercell_btn", type="primary"):
                 if st.session_state.represented_structure:
                     st.session_state.supercell_n_a, st.session_state.supercell_n_b, st.session_state.supercell_n_c = n_a_ui, n_b_ui, n_c_ui
                     try:
@@ -1550,6 +1569,7 @@ if st.session_state.uploaded_files:
             with col_defect_ops:
                 atom_count_defects = len(active_pmg_for_defects)
                 defect_op_limit = 32
+                defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
                               "Create Vacancies", "Substitute Atoms"]
                 current_defect_op_options = defect_ops
@@ -1603,13 +1623,24 @@ if st.session_state.uploaded_files:
                 elif operation_mode == "Create Vacancies":
                     st.markdown("**Create Vacancies Settings**")
                     vac_c1, vac_c2 = st.columns(2)
-                    vac_mode = vac_c1.selectbox("Selection Mode", ["farthest", "nearest", "moderate"], 0,
-                                                key="vac_mode")
+                    atom_count_for_vac = len(active_pmg_for_defects)
+                    if atom_count_for_vac > 500:
+                        available_vac_modes = ["random"]
+                        st.warning(
+                            f"⚠️ Structure has {atom_count_for_vac} atoms. Only 'random' mode available for performance (limit: 500 atoms for distance-based modes).")
+                    else:
+                        available_vac_modes = ["farthest", "nearest", "moderate", "random"]
+
+                    with vac_c1:
+                        vac_mode = st.selectbox("Selection Mode", available_vac_modes, 0, key="vac_mode")
+
                     vac_target = 0.5
                     if vac_mode == "moderate":
                         vac_target = vac_c2.number_input("Target (0=nearest, 1=farthest)", 0.0, 1.0, 0.5, 0.1,
-                                                         format="%.1f",
-                                                         key="vac_target")
+                                                         format="%.1f", key="vac_target")
+                    elif vac_mode == "random":
+                        with vac_c2:
+                            st.info("Random selection")
                     vac_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
                     vac_percent = {}
                     if vac_els:
@@ -1658,13 +1689,24 @@ if st.session_state.uploaded_files:
                 elif operation_mode == "Substitute Atoms":
                     st.markdown("**Substitute Atoms Settings**")
                     sub_c1, sub_c2 = st.columns(2)
-                    sub_mode = sub_c1.selectbox("Selection Mode", ["farthest", "nearest", "moderate"], 0,
-                                                key="sub_mode")
+                    atom_count_for_sub = len(active_pmg_for_defects)
+                    if atom_count_for_sub > 500:
+                        available_sub_modes = ["random"]
+                        st.warning(
+                            f"⚠️ Structure has {atom_count_for_sub} atoms. Only 'random' mode available for performance (limit: 500 atoms for distance-based modes).")
+                    else:
+                        available_sub_modes = ["farthest", "nearest", "moderate", "random"]
+
+                    with sub_c1:
+                        sub_mode = st.selectbox("Selection Mode", available_sub_modes, 0, key="sub_mode")
+
                     sub_target = 0.5
                     if sub_mode == "moderate":
                         sub_target = sub_c2.number_input("Target (0=nearest, 1=farthest)", 0.0, 1.0, 0.5, 0.1,
-                                                         format="%.1f",
-                                                         key="sub_target")
+                                                         format="%.1f", key="sub_target")
+                    elif sub_mode == "random":
+                        with sub_c2:
+                            st.info("Random selection")
                     sub_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
                     sub_settings = {}
                     if sub_els:
@@ -1723,12 +1765,18 @@ if st.session_state.uploaded_files:
                     else:
                         st.warning("No elements for substitution.")
 
+               # enable_batch = st.checkbox(
+               #     "🎲 Enable Batch Generation (Generate multiple configurations with different random seeds)",
+               #     value=st.session_state.enable_batch_generation,
+               #     key="enable_batch_checkbox")
                 enable_batch = st.checkbox(
                     "🎲 Enable Batch Generation (Generate multiple configurations with different random seeds)",
-                    value=st.session_state.enable_batch_generation,
-                    key="enable_batch_checkbox")
+                 #   value=st.session_state.enable_batch_generation,
+                    key="enable_batch_generation")
                 if enable_batch != st.session_state.enable_batch_generation:
                     st.session_state.enable_batch_generation = enable_batch
+                if not enable_batch:
+                    st.session_state.generated_structures = {}
 
                 if st.session_state.enable_batch_generation:
                     st.markdown("### 🎲 Batch Generation & Download")
@@ -1742,7 +1790,7 @@ if st.session_state.uploaded_files:
                         n_configurations = st.number_input("Number of configurations", 1, 50, 10, 1, key="n_configs")
                         starting_seed = st.number_input("Starting random seed", 0, 9999, 42, 1, key="start_seed")
 
-                        if st.button("🎲 Generate Multiple Defect Configurations", key="generate_batch_btn"):
+                        if st.button("🎲 Generate Multiple Defect Configurations", key="generate_batch_btn", type = 'primary'):
                             if st.session_state.current_structure_before_defects:
                                 with st.spinner(f"Generating {n_configurations} configurations..."):
                                     st.session_state.generated_structures = {}
@@ -1806,7 +1854,7 @@ if st.session_state.uploaded_files:
                                 batch_masses = st.checkbox("Include masses", True, key="batch_masses")
                                 batch_skew = st.checkbox("Force skew", False, key="batch_skew")
 
-                            if st.button("📦 Download All Configurations", key="download_batch_btn"):
+                            if st.button("📦 Download All Configurations", key="download_batch_btn", type = 'primary'):
                                 import zipfile
                                 from io import BytesIO
 
@@ -1887,67 +1935,69 @@ if st.session_state.uploaded_files:
                 if operation_mode == "Insert Interstitials (Voronoi method)":
                     col_preview, col_apply = st.columns(2)
                     with col_preview:
-                        if st.button("Preview Interstitial Sites", key="preview_interstitials_btn"):
+                        if st.button("Preview Interstitial Sites", key="preview_interstitials_btn", type = "tertiary"):
                             with col_defect_log:
-                                st.markdown("###### Interstitial Sites Preview")
-                                with st.spinner("Calculating available interstitials sites..."):
-                                    try:
-                                        from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
+                                with st.expander("Preview Interstitial Sites", expanded = True):
+                                    st.markdown("###### Interstitial Sites Preview")
+                                    with st.spinner("Calculating available interstitials sites..."):
+                                        try:
+                                            from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
 
-                                        generator = VoronoiInterstitialGenerator(clustering_tol=int_clust,
-                                                                                 min_dist=int_min_dist)
-                                        unique_interstitial_types = list(generator.generate(active_pmg_for_defects, "H"))
+                                            generator = VoronoiInterstitialGenerator(clustering_tol=int_clust,
+                                                                                     min_dist=int_min_dist)
+                                            unique_interstitial_types = list(generator.generate(active_pmg_for_defects, "H"))
 
-                                        if not unique_interstitial_types:
-                                            st.warning("No interstitial sites found.")
-                                        else:
-                                            st.success(
-                                                f"Found {len(unique_interstitial_types)} unique interstitial site types:")
+                                            if not unique_interstitial_types:
+                                                st.warning("No interstitial sites found.")
+                                            else:
+                                                st.success(
+                                                    f"Found {len(unique_interstitial_types)} unique interstitial site types:")
 
-                                            total_sites = 0
-                                            for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
-                                                site_coords = interstitial_type_obj.site.frac_coords
-                                                site_classification = classify_interstitial_site(active_pmg_for_defects,
-                                                                                                 site_coords)
-                                                equiv_sites_count = len(interstitial_type_obj.equivalent_sites)
-                                                total_sites += equiv_sites_count
+                                                total_sites = 0
+                                                for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
+                                                    site_coords = interstitial_type_obj.site.frac_coords
+                                                    site_classification = classify_interstitial_site(active_pmg_for_defects,
+                                                                                                     site_coords)
+                                                    equiv_sites_count = len(interstitial_type_obj.equivalent_sites)
+                                                    total_sites += equiv_sites_count
 
-                                                st.write(f"**Type {i_type + 1}:**")
-                                                st.write(f"  Position: {np.round(site_coords, 4)}")
-                                                st.write(f"  Classification: {site_classification}")
-                                                st.write(f"  Equivalent sites: {equiv_sites_count}")
-                                                st.write("---")
+                                                    st.write(f"**Type {i_type + 1}:**")
+                                                    st.write(f"  Position: {np.round(site_coords, 4)}")
+                                                    st.write(f"  Classification: {site_classification}")
+                                                    st.write(f"  Equivalent sites: {equiv_sites_count}")
+                                                    st.write("---")
 
-                                            st.info(f"**Total available interstitial sites: {total_sites}**")
+                                                st.info(f"**Total available interstitial sites: {total_sites}**")
 
-                                            if int_type_idx == 0:
-                                                st.write(f"Selected: All types ({total_sites} sites)")
-                                            elif 0 < int_type_idx <= len(unique_interstitial_types):
-                                                selected_type = unique_interstitial_types[int_type_idx - 1]
-                                                selected_count = len(selected_type.equivalent_sites)
-                                                st.write(f"Selected: Type {int_type_idx} ({selected_count} sites)")
+                                                if int_type_idx == 0:
+                                                    st.write(f"Selected: All types ({total_sites} sites)")
+                                                elif 0 < int_type_idx <= len(unique_interstitial_types):
+                                                    selected_type = unique_interstitial_types[int_type_idx - 1]
+                                                    selected_count = len(selected_type.equivalent_sites)
+                                                    st.write(f"Selected: Type {int_type_idx} ({selected_count} sites)")
 
-                                    except Exception as e:
-                                        st.error(f"Error analyzing interstitial sites: {e}")
+                                        except Exception as e:
+                                            st.error(f"Error analyzing interstitial sites: {e}")
 
                     with col_apply:
-                        if st.button("Apply Interstitials to Structure", key="apply_interstitials_btn"):
-                            init_n = len(active_pmg_for_defects)
-                            mod_struct = insert_interstitials_into_structure(active_pmg_for_defects, int_el, int_n,
-                                                                             int_type_idx,
-                                                                             int_mode, int_clust, int_min_dist,
-                                                                             int_target, col_defect_log)
-                            if len(mod_struct) > init_n:
-                                st.session_state.current_structure = mod_struct
-                                st.session_state.helpful = True
-                                with col_defect_log:
-                                    st.success("Interstitials applied to structure.")
-                                st.rerun()
-                            else:
-                                with col_defect_log:
-                                    st.warning("No interstitials were added to the structure.")
+                        if not st.session_state.enable_batch_generation:
+                            if st.button("Apply Interstitials to Structure", key="apply_interstitials_btn", type="primary"):
+                                init_n = len(active_pmg_for_defects)
+                                mod_struct = insert_interstitials_into_structure(active_pmg_for_defects, int_el, int_n,
+                                                                                 int_type_idx,
+                                                                                 int_mode, int_clust, int_min_dist,
+                                                                                 int_target, col_defect_log)
+                                if len(mod_struct) > init_n:
+                                    st.session_state.current_structure = mod_struct
+                                    st.session_state.helpful = True
+                                    with col_defect_log:
+                                        st.success("Interstitials applied to structure.")
+                                    st.rerun()
+                                else:
+                                    with col_defect_log:
+                                        st.warning("No interstitials were added to the structure.")
 
-                elif st.button("Apply Selected Defect Operation", key="apply_defect_op_btn"):
+                elif not st.session_state.enable_batch_generation and st.button("Apply Selected Defect Operation", key="apply_defect_op_btn", type = 'primary'):
                     mod_struct = active_pmg_for_defects.copy()
                     changed = False
                     with col_defect_log:
@@ -1975,9 +2025,14 @@ if st.session_state.uploaded_files:
                     with col_defect_log:
                         col_defect_log.success(
                             "Defect op applied." if changed else "Defect op finished (structure may be unchanged).")
+                        st.success("Will refresh interface in 3 seconds, please wait")
+                    st.toast(f"{operation_mode} completed successfully!. Refresh in 3 seconds.", icon="✅")
+                    time.sleep(3)
                     st.rerun()
 
-                if st.button("🔄 Reset Defects (to applied supercell)", key="reset_defects_btn"):
+
+
+                if st.button("🔄 Reset Defects (to applied supercell)", key="reset_defects_btn",  type="secondary"):
                     if st.session_state.current_structure_before_defects:
                         st.session_state.current_structure = st.session_state.current_structure_before_defects.copy()
                     st.session_state.helpful = False
@@ -2000,21 +2055,27 @@ if st.session_state.uploaded_files:
         if pmg_to_visualize:
             total_atoms = len(pmg_to_visualize)
 
-            if total_atoms < 500:
+            if total_atoms < 5000:
                 # Show full visualization and structure info for structures with < 500 atoms
                 ase_to_visualize = AseAtomsAdaptor.get_atoms(pmg_to_visualize)
                 col_viz, col_dl = st.columns([2, 1])
 
                 with col_viz:
+                    #show_3d = st.checkbox("Show 3D Visualization",
+                    #                      value=st.session_state.show_3d_visualization,
+                    #                      key="show_3d_cb_main")
                     show_3d = st.checkbox("Show 3D Visualization",
-                                          value=st.session_state.show_3d_visualization,
-                                          key="show_3d_cb_main")
+                                          #value=st.session_state.show_3d_visualization,
+                                          key="show_3d_visualization")
                     if show_3d != st.session_state.show_3d_visualization:
                         st.session_state.show_3d_visualization = show_3d
 
+                   # show_labels = st.checkbox("Show atomic labels",
+                   #                           value=st.session_state.show_atomic_labels,
+                   #                           key="show_labels_cb_main")
                     show_labels = st.checkbox("Show atomic labels",
-                                              value=st.session_state.show_atomic_labels,
-                                              key="show_labels_cb_main")
+                                              #value=st.session_state.show_atomic_labels,
+                                              key="show_atomic_labels")
                     if show_labels != st.session_state.show_atomic_labels:
                         st.session_state.show_atomic_labels = show_labels
 
@@ -2057,6 +2118,107 @@ if st.session_state.uploaded_files:
                         )
 
                 with col_dl:
+                    col_sg_analysis, col_sg_apply = st.columns(2)
+                    with col_sg_analysis:
+                        if st.button("🔍 Determine Space Group", key="determine_sg_btn", type='secondary',
+                                     help="Analyze current structure symmetry"):
+                            if pmg_to_visualize:
+                                with st.spinner("Analyzing symmetry..."):
+                                    try:
+                                        analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=0.1)
+                                        spg_symbol = analyzer.get_space_group_symbol()
+                                        spg_number = analyzer.get_space_group_number()
+                                        crystal_system = analyzer.get_crystal_system()
+
+                                        # Store in session state for display
+                                        st.session_state.current_sg_info = {
+                                            'symbol': spg_symbol,
+                                            'number': spg_number,
+                                            'crystal_system': crystal_system
+                                        }
+
+                                        st.success(f"**Space Group:** {spg_symbol} (#{spg_number})")
+                                        st.info(f"**Crystal System:** {crystal_system.capitalize()}")
+
+                                        # Additional symmetry info
+                                        try:
+                                            point_group = analyzer.get_point_group_symbol()
+                                        except:
+                                            pass
+                                        laue_group = get_laue_group(spg_number)
+                                        if laue_group != point_group:
+                                            st.info(f"*Point Group:** {point_group}, **Laue Group:** {laue_group}")
+                                        else:
+                                            st.info(f"**Point Group:** {point_group}, **Laue Group:** {laue_group} (same as point group)")
+
+                                        # Check if structure is already in standard setting
+                                        try:
+                                            conventional = analyzer.get_conventional_standard_structure()
+                                            primitive = analyzer.get_primitive_standard_structure()
+
+                                            if len(conventional) != len(pmg_to_visualize):
+                                                st.warning(
+                                                    f"Current structure ({len(pmg_to_visualize)} atoms) differs from conventional ({len(conventional)} atoms)")
+                                            else:
+                                                st.success("Structure appears to be in conventional setting")
+
+                                        except Exception as e:
+                                            st.warning("Could not compare with conventional structure")
+
+                                    except Exception as e:
+                                        st.error(f"Error analyzing symmetry: {e}")
+                                        st.session_state.current_sg_info = None
+                            else:
+                                st.error("No structure available for analysis")
+
+                    with col_sg_apply:
+                        if st.button("⚙️ Apply Standard Symmetry", key="apply_symmetry_btn", type = 'secondary',
+                                     help="Convert to standard conventional cell"):
+                            if pmg_to_visualize:
+                                with st.spinner("Applying standard symmetry..."):
+                                    try:
+                                        # Get current structure info for comparison
+                                        original_atoms = len(pmg_to_visualize)
+                                        original_formula = pmg_to_visualize.composition.reduced_formula
+
+                                        analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=0.1)
+
+                                        # Get conventional standard structure
+                                        conventional_structure = analyzer.get_conventional_standard_structure()
+
+                                        # Update the current structure
+                                        st.session_state.current_structure = conventional_structure.copy()
+
+                                        # Update other relevant session states if they exist
+                                        if hasattr(st.session_state, 'represented_structure'):
+                                            st.session_state.represented_structure = conventional_structure.copy()
+
+                                        # Reset supercell and defect states since structure changed
+                                        reset_supercell_and_defect_states()
+
+                                        new_atoms = len(conventional_structure)
+                                        spg_symbol = analyzer.get_space_group_symbol()
+                                        spg_number = analyzer.get_space_group_number()
+
+                                        st.success(f"✅ Applied standard symmetry!")
+                                        st.info(f"**Space Group:** {spg_symbol} (#{spg_number})")
+                                        st.info(
+                                            f"**Structure:** {original_formula} | {original_atoms} → {new_atoms} atoms")
+
+                                        if new_atoms != original_atoms:
+                                            st.warning(f"⚠️ Atom count changed: {original_atoms} → {new_atoms} atoms")
+                                            st.info("This is normal when converting to conventional cell")
+
+                                        # Force page refresh to update visualization
+                                        st.rerun()
+
+                                    except Exception as e:
+                                        st.error(f"Error applying symmetry: {e}")
+                                        st.info(
+                                            "💡 **Tip:** Try adjusting symmetry precision or check if structure has defects")
+                            else:
+                                st.error("No structure available for symmetry operations")
+
                     st.markdown("##### Structure Info")
                     cp = ase_to_visualize.get_cell_lengths_and_angles()
                     vol = ase_to_visualize.get_volume()
@@ -2080,16 +2242,16 @@ if st.session_state.uploaded_files:
                         f"a={cp[0]:.4f} Å b={cp[1]:.4f} Å c={cp[2]:.4f} Å<br>α={cp[3]:.2f}° β={cp[4]:.2f}° γ={cp[5]:.2f}°<br>Vol={vol:.2f} Å³",
                         unsafe_allow_html=True)
 
-                    if len(pmg_to_visualize) < 500:
-                        try:
-                            spg_info = get_cached_space_group_info(pmg_to_visualize)
-                            st.markdown(
-                                f"<b>Space Group:</b> {spg_info['symbol']} ({spg_info['number']})",
-                                unsafe_allow_html=True)
-                        except Exception:
-                            st.markdown("<b>Space Group:</b> N/A or low symmetry", unsafe_allow_html=True)
-                    else:
-                        st.markdown("<b>Space Group:</b> Skipped (>500 atoms)", unsafe_allow_html=True)
+                    #if len(pmg_to_visualize) < 500:
+                     #   try:
+                           # spg_info = get_cached_space_group_info(pmg_to_visualize)
+                           # st.markdown(
+                           #     f"<b>Space Group:</b> {spg_info['symbol']} ({spg_info['number']})",
+                           #     unsafe_allow_html=True)
+                        #except Exception:
+                        #    st.markdown("<b>Space Group:</b> N/A or low symmetry", unsafe_allow_html=True)
+                    #else:
+                       # st.markdown("<b>Space Group:</b> Skipped (>500 atoms)", unsafe_allow_html=True)
 
                 if st.session_state.show_atomic_labels and st.session_state.show_3d_visualization:
                     atom_info_data = []
@@ -2217,10 +2379,10 @@ def get_memory_usage():
     return mem_info.rss / (1024 ** 2)  # in MB
 
 
-#memory_usage = get_memory_usage()
-#st.write(
-#    f"🔍 Current memory usage: **{memory_usage:.2f} MB**. We are now using free hosting by Streamlit Community Cloud servis, which has a limit for RAM memory of 2.6 GBs. For more extensive computations, please compile the application locally from the [GitHub](https://github.com/bracerino/xrdlicious).")
-#
+memory_usage = get_memory_usage()
+st.write(
+    f"🔍 Current memory usage: **{memory_usage:.2f} MB**. We are now using free hosting by Streamlit Community Cloud servis, which has a limit for RAM memory of 2.6 GBs. For more extensive computations, please compile the application locally from the [GitHub](https://github.com/bracerino/xrdlicious).")
+
 st.markdown("""
 
 ### Acknowledgments
