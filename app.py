@@ -2220,7 +2220,7 @@ if st.session_state.uploaded_files:
                                 st.error("No structure available for symmetry operations")
 
                     st.markdown("##### Structure Info")
-                    cp = ase_to_visualize.get_cell_lengths_and_angles()
+                    cp = ase_to_visualize.cell.cellpar()
                     vol = ase_to_visualize.get_volume()
 
                     element_counts = {}
