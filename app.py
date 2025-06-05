@@ -1514,7 +1514,7 @@ if st.session_state.uploaded_files:
                     except Exception as e:
                         st.error(f"Error updating lattice parameters: {e}")
         st.info(
-            f"Supercell will be built from: **{st.session_state.current_cell_representation_type}** ({len(st.session_state.represented_structure)} atoms).")
+            f"Supercell will be built from: **{st.session_state.current_cell_representation_type}** ({len(st.session_state.represented_structure)} atoms). You can change the cell representation from the sidebar.")
 
         st.markdown("### 2. Define Supercell")
         supercell_applied_locally = st.session_state.supercell_settings_applied
