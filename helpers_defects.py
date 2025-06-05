@@ -1375,7 +1375,11 @@ def select_spaced_points_original(frac_coords_list, n_points, mode, target_value
         selected_coords_out = frac_coords_list.copy()
         return selected_coords_out, selected_indices
 
-    if mode == "farthest":
+    if mode == "random":
+        import random
+        selected_indices = random.sample(range(n_available), n_points)
+
+    elif mode == "farthest":
         dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
         selected_indices = []
 
@@ -1534,9 +1538,6 @@ def compute_periodic_distance_matrix_optimized(frac_coords, max_distance=None):
 def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
                                      target_value=0.5, random_seed=None,
                                      min_distance_threshold=0.1):
-    """
-    Fast selection using KDTree for nearest neighbor queries
-    """
     if not frac_coords_list or n_points == 0:
         return [], []
 
@@ -1756,9 +1757,7 @@ def select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
 
 def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
                                     grid_resolution=10, random_seed=None):
-    """
-    Grid-based selection for uniform distribution
-    """
+
     if not frac_coords_list or n_points == 0:
         return [], []
 
@@ -1826,9 +1825,6 @@ def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
 
 # Example usage and performance comparison
 def benchmark_selection_methods():
-    """
-    Benchmark different selection methods
-    """
     import time
 
     # Generate test data
@@ -1873,30 +1869,27 @@ def benchmark_selection_methods():
 # Updated function to replace in your code
 def select_spaced_points(frac_coords_list, n_points, mode,
                                    target_value=0.5, random_seed=None):
-    """
-    Main optimized function to replace your original select_spaced_points
-    """
     n_available = len(frac_coords_list)
 
     # Choose algorithm based on dataset size
-    if n_available < 1000:
-        st.write("ORIGINAL")
+    if n_available < 100_000_000:
+        #st.write("ORIGINAL")
         # Use original algorithm for small datasets
         return select_spaced_points_original(frac_coords_list, n_points, mode,
                                              target_value, random_seed)
-    elif n_available < 10000:
+    elif n_available < 200_000_000:
         # Use KDTree-based algorithm
-        st.write("KDTREE")
+        #st.write("KDTREE")
         return select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
                                                 target_value, random_seed)
-    elif n_available < 50000:
-        st.write("HIERARCH")
+    elif n_available < 500_000_000:
+        #st.write("HIERARCH")
         # Use hierarchical algorithm
         return select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
                                                  target_value, random_seed)
     else:
         # Use grid-based algorithm for very large datasets
-        st.write("GRIDBASE")
+        #st.write("GRIDBASE")
         return select_spaced_points_grid_based(frac_coords_list, n_points, mode,
                                                random_seed=random_seed)
 
@@ -1924,10 +1917,8 @@ def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_eleme
         positions = ase_atoms.get_positions()
         cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
 
-        # Strategy 1: Adaptive grid spacing based on structure size
         n_atoms = len(structure_obj)
         if n_atoms > 10000:
-            # Increase grid spacing for large structures
             adaptive_spacing = max(grid_spacing, grid_spacing * (n_atoms / 10000) ** 0.3)
             if log_area:
                 log_area.info(
@@ -2318,9 +2309,7 @@ def remove_vacancies_from_structure(structure_obj, vacancy_percentages_dict, sel
         np.random.seed(random_seed)
 
     if log_area: log_area.info(f"Attempting to create vacancies...")
-    st.info("HERE?")
     new_structure_vac = structure_obj.copy()
-    st.info("HERE NOT?")
     indices_to_remove_overall = []
     for el_symbol, perc_to_remove in vacancy_percentages_dict.items():
         if perc_to_remove <= 0: continue
@@ -3370,3 +3359,30 @@ def insert_database(ELEMENTS):
                                 st.info(
                                     f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
 
+
+def get_laue_group(space_group_number):
+    laue_groups = {
+        # Triclinic
+        range(1, 3): "-1",
+        # Monoclinic
+        range(3, 16): "2/m",
+        # Orthorhombic
+        range(16, 75): "mmm",
+        # Tetragonal
+        range(75, 89): "4/m",
+        range(89, 143): "4/mmm",
+        # Trigonal
+        range(143, 149): "-3",
+        range(149, 168): "-3m",
+        # Hexagonal
+        range(168, 177): "6/m",
+        range(177, 195): "6/mmm",
+        # Cubic
+        range(195, 207): "m-3",
+        range(207, 231): "m-3m"
+    }
+
+    for sg_range, laue in laue_groups.items():
+        if space_group_number in sg_range:
+            return laue
+    return "Unknown"
