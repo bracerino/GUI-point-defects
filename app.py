@@ -1186,10 +1186,10 @@ if st.session_state.uploaded_files:
     elif file_options:
         st.session_state.selected_file = file_options[0]
 
-    st.subheader("Select Structure:")
+    st.sidebar.subheader("Select Structure:")
     selector_key = "file_selector_selectbox" if len(file_options) > 5 else "file_selector_radio"
-    newly_selected_file = st.selectbox("Available files:", file_options, index=current_selected_file_index,
-                                       key=selector_key) if len(file_options) > 1 else st.radio("Available files:",
+    newly_selected_file = st.sidebar.selectbox("Available files:", file_options, index=current_selected_file_index,
+                                       key=selector_key) if len(file_options) > 1 else st.sidebar.radio("Available files:",
                                                                                                 file_options,
                                                                                                 index=current_selected_file_index,
                                                                                                 key=selector_key)
@@ -1214,7 +1214,7 @@ if st.session_state.uploaded_files:
         st.rerun()
 
     if st.session_state.current_structure and st.session_state.represented_structure:
-        st.markdown("### 1. Cell Representation")
+        st.sidebar.markdown("### 1. Cell Representation")
 
         col_checkbox, col_info = st.columns([1, 1])
 
@@ -1243,7 +1243,7 @@ if st.session_state.uploaded_files:
         current_rep_type_idx = CELL_REPRESENTATION_OPTIONS.index(st.session_state.current_cell_representation_type) \
             if st.session_state.current_cell_representation_type in CELL_REPRESENTATION_OPTIONS else 0
 
-        selected_representation_type_ui = st.radio(
+        selected_representation_type_ui = st.sidebar.radio(
             "Choose cell type:", options=CELL_REPRESENTATION_OPTIONS, index=current_rep_type_idx,
             key="cell_rep_radio", horizontal=True
         )
