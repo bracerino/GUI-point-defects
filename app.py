@@ -1275,7 +1275,7 @@ if st.session_state.uploaded_files:
                     preview_info = get_structure_info(st.session_state.preview_structure)
                     st.markdown(preview_info)
 
-            if st.button("Apply Selected Cell Representation", key="apply_cell_rep_btn", type = 'primary'):
+            if st.sidebar.button("Apply Selected Cell Representation", key="apply_cell_rep_btn", type = 'primary'):
                 if st.session_state.preview_structure:
                     st.session_state.represented_structure = st.session_state.preview_structure.copy()
                     st.session_state.current_structure = st.session_state.preview_structure.copy()
