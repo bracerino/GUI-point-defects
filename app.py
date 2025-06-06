@@ -373,7 +373,6 @@ if show_database_search:
                                             st.warning("Please enter a chemical formula for Materials Project search.")
                                             continue
 
-                                        # Convert space-separated format to compact format (Sr Ti O3 -> SrTiO3)
                                         clean_formula = formula_input.strip()
                                         if ' ' in clean_formula:
                                             parts = clean_formula.split()
@@ -1566,7 +1565,7 @@ if st.session_state.uploaded_files:
             col_defect_ops, col_defect_log = st.columns([2, 1])
             with col_defect_ops:
                 atom_count_defects = len(active_pmg_for_defects)
-                defect_op_limit = 32
+                defect_op_limit = 64
                 defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
                               "Create Vacancies", "Substitute Atoms"]
@@ -1579,6 +1578,132 @@ if st.session_state.uploaded_files:
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
                 operation_mode = st.selectbox("Choose Defect Operation", current_defect_op_options, key=op_mode_key)
+               # st.markdown("#### 🎯 Point Selection Algorithm")
+
+                col_algo1, col_algo2 = st.columns([2, 1])
+
+                with col_algo1:
+                    if atom_count_defects < 24:
+                        point_selection_algorithm = st.selectbox(
+                            "Algorithm for Point Selection:",
+                            options=[
+                                "original",
+                                "iterative",
+                                "global_exact",
+                            ],
+                            format_func=lambda x: {
+                                "original": "Greedy (Fast)",
+                                "iterative": "Iterative Improvement",
+                                "global_exact": "Global Exact - Perfect but very slow",
+                            }[x],
+                            index=0,
+                            help="Choose algorithm for selecting defect positions"
+                        )
+                    else:
+                        point_selection_algorithm = st.selectbox(
+                            "Algorithm for Point Selection:",
+                            options=[
+                                "original",
+                                "iterative",
+                            ],
+                            format_func=lambda x: {
+                                "original": "Greedy (Fast)",
+                                "iterative": "Iterative Improvement",
+                            }[x],
+                            index=0,
+                            help="Choose algorithm for selecting defect positions"
+                        )
+
+                with col_algo2:
+                    if point_selection_algorithm == "original":
+                        st.success("🚀 Fast")
+                    elif point_selection_algorithm == "iterative":
+                        st.info("⚡ Good balance")
+                    elif point_selection_algorithm == "genetic":
+                        st.warning("🐌 Slower")
+                    elif point_selection_algorithm == "global_exact":
+                        st.error("⚠️ Very slow")
+                    else:
+                        st.info("🤖 Auto")
+                show_algo_help = st.checkbox("📚 Show algorithm explanations", key="algo_help_detailed")
+                if show_algo_help:
+                    st.markdown("---")
+                    st.markdown("#### 🔬 Algorithm Details")
+
+                    with st.expander("**Greedy points** - Fast but Basic", expanded=False):
+                        st.markdown("""
+                        **How it works:**
+                        - Starts with a random point 
+                        - For each subsequent point, chooses the one that maximizes the minimum distance or maximum to already selected points
+                        - Uses a greedy approach: makes the locally best choice at each step
+
+                        **Advantages:**
+                        - ⚡ Very fast execution
+                        - 💾 Low memory usage
+
+                        **Disadvantages:**
+                        - 📉 May not find the globally optimal distribution
+
+                        **Recommended option** as it is fast and still reliable 
+                        """)
+
+                    with st.expander("**Iterative Improvement**", expanded=False):
+                        st.markdown("""
+                        **How it works:**
+                        - Starts with greedy algorithm result
+                        - Iteratively tries to improve by swapping selected points with unselected ones
+                        - Keeps improvements that increase the minimum pairwise distance
+                        - Continues until no more improvements are found
+
+                        **Advantages:**
+                        - 📈 Better distribution than greedy
+                        - ⚡ Still relatively fast
+                        - 🔄 Self-improving process
+
+                        **Disadvantages:**
+                        - 🐌 Slower than original greedy
+                        - 🎯 Still not guaranteed to find global optimum
+                        - 🔄 May require many iterations for convergence
+                        """)
+
+                    with st.expander("**Global Exact** - Perfect but Very Slow", expanded=False):
+                        st.markdown("""
+                        **How it works:**
+                        - Exhaustively evaluates ALL possible combinations of points
+                        - Calculates the minimum pairwise distance for each combination
+                        - Selects the combination with the maximum minimum distance
+                        - Guarantees the mathematically optimal solution
+
+                        **Advantages:**
+                        - 🏆 Guaranteed optimal solution
+                        - 📊 Perfect distribution quality
+
+                        **Disadvantages:**
+                        - 🐌🐌🐌 EXTREMELY slow (exponential complexity)
+                        - 💾 High memory requirements
+                        - ⚠️ Only practical for very small structures (≤12 atoms)
+
+                        **Note:** This algorithm is only available for structures with ≤15 atoms
+                        """)
+
+                    st.markdown("---")
+                    st.info(
+                        "💡 **Recommendation:** Use fast greedy algorithm.")
+                    st.markdown("---")
+                # Performance warnings
+                if point_selection_algorithm == "global_exact":
+                    st.warning(
+                        "⚠️ **Global Exact Algorithm**: Only use with structures having <15 total atoms.")
+
+                elif point_selection_algorithm == "genetic":
+                    n_atoms = len(st.session_state.current_structure) if hasattr(st.session_state,
+                                                                                 'current_structure') and st.session_state.current_structure else 0
+                    if n_atoms > 100:
+                        st.info(
+                            "💡 **Genetic Algorithm**: May take 10-30 seconds for large structures. Consider 'Iterative' for faster results.")
+
+
+                st.session_state.point_selection_algorithm = point_selection_algorithm
 
                 if operation_mode == "Insert Interstitials (Voronoi method)":
                     st.markdown("**Insert Interstitials Settings (Voronoi - Accurate but Slow)**")
@@ -1638,7 +1763,13 @@ if st.session_state.uploaded_files:
                                                          format="%.1f", key="vac_target")
                     elif vac_mode == "random":
                         with vac_c2:
-                            st.info("Random selection")
+                            st.info("Will randomly select sites.")
+                    elif vac_mode == "farthest":
+                        with vac_c2:
+                            st.info("Will perform search for the farthest sites.")
+                    elif vac_mode == "nearest":
+                        with vac_c2:
+                            st.info("Will perform search for the nearest sites.")
                     vac_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
                     vac_percent = {}
                     if vac_els:
@@ -2145,11 +2276,10 @@ if st.session_state.uploaded_files:
                                             pass
                                         laue_group = get_laue_group(spg_number)
                                         if laue_group != point_group:
-                                            st.info(f"*Point Group:** {point_group}, **Laue Group:** {laue_group}")
+                                            st.info(f"**Point Group:** {point_group}, **Laue Group:** {laue_group}")
                                         else:
                                             st.info(f"**Point Group:** {point_group}, **Laue Group:** {laue_group} (same as point group)")
 
-                                        # Check if structure is already in standard setting
                                         try:
                                             conventional = analyzer.get_conventional_standard_structure()
                                             primitive = analyzer.get_primitive_standard_structure()
@@ -2175,23 +2305,18 @@ if st.session_state.uploaded_files:
                             if pmg_to_visualize:
                                 with st.spinner("Applying standard symmetry..."):
                                     try:
-                                        # Get current structure info for comparison
+
                                         original_atoms = len(pmg_to_visualize)
                                         original_formula = pmg_to_visualize.composition.reduced_formula
 
                                         analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=0.1)
 
-                                        # Get conventional standard structure
                                         conventional_structure = analyzer.get_conventional_standard_structure()
 
-                                        # Update the current structure
                                         st.session_state.current_structure = conventional_structure.copy()
 
-                                        # Update other relevant session states if they exist
                                         if hasattr(st.session_state, 'represented_structure'):
                                             st.session_state.represented_structure = conventional_structure.copy()
-
-                                        # Reset supercell and defect states since structure changed
                                         reset_supercell_and_defect_states()
 
                                         new_atoms = len(conventional_structure)
@@ -2206,8 +2331,6 @@ if st.session_state.uploaded_files:
                                         if new_atoms != original_atoms:
                                             st.warning(f"⚠️ Atom count changed: {original_atoms} → {new_atoms} atoms")
                                             st.info("This is normal when converting to conventional cell")
-
-                                        # Force page refresh to update visualization
                                         st.rerun()
 
                                     except Exception as e:
@@ -2268,7 +2391,7 @@ if st.session_state.uploaded_files:
             else:
                 # For structures with >= 500 atoms, show warning and only download options
                 st.warning(
-                    f"⚠️ Structure has {total_atoms} atoms (≥500). Visualization disabled for performance. Download options available below.")
+                    f"⚠️ Structure has {total_atoms} atoms (≥5000). Visualization disabled for performance. Download options available below.")
                 ase_to_visualize = AseAtomsAdaptor.get_atoms(pmg_to_visualize)
 
             # Download section (shown for all structures regardless of size)
@@ -2279,7 +2402,7 @@ if st.session_state.uploaded_files:
             sc_factors_fn = f"SC{st.session_state.applied_supercell_n_a}x{st.session_state.applied_supercell_n_b}x{st.session_state.applied_supercell_n_c}"
             suffix_fn = f"{applied_cell_fn}_{sc_factors_fn}" if st.session_state.supercell_settings_applied else applied_cell_fn
 
-            # Show format-specific options without generating content
+
             if fmt_dl == "VASP":
                 colsss, colyyy = st.columns([1, 1])
                 with colsss:
@@ -2299,7 +2422,7 @@ if st.session_state.uploaded_files:
                     include_masses = st.checkbox("Include atomic masses", value=True, key="lmp_masses_dl")
                     force_skew = st.checkbox("Force triclinic cell (skew)", value=False, key="lmp_skew_dl")
 
-            # Only generate content when download button is pressed
+
             if st.button(f"Download {fmt_dl}", type="primary", key=f"dl_btn_{fmt_dl}"):
                 try:
                     if fmt_dl == "CIF":
