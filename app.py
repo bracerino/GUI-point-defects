@@ -1565,7 +1565,7 @@ if st.session_state.uploaded_files:
             col_defect_ops, col_defect_log = st.columns([2, 1])
             with col_defect_ops:
                 atom_count_defects = len(active_pmg_for_defects)
-                defect_op_limit = 64
+                defect_op_limit = 110
                 defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
                               "Create Vacancies", "Substitute Atoms"]
