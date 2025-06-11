@@ -40,6 +40,6 @@ Open your terminal console and write the following commands (the bold text):
 ### Workflow illustration
 - Upload structure and create supercell
 - Select mode and its settings (introduce interstitials, vacancies, or substitutes). For less than 500 atoms in the structure, it is possible to select to place the defects either as far away as possible, as near as possible, or something in between these two cases using fast greedy algorithm (see the description on the application website). For higher number, it is possible to place the defects only randomly do to large computational demand.
-![Select point defects mode](Point_Defects_Module/point_defects_1.png)
+![Select point defects mode](Point_Defects_Module/point_defects_2.png)
 - Apply the settings and download the modified defected structure.
-![Apply settings and download structure](Point_Defects_Module/point_defects_1.png)
+![Apply settings and download structure](Point_Defects_Module/point_defects_3.png)
