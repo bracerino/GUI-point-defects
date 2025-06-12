@@ -2194,7 +2194,7 @@ if st.session_state.uploaded_files:
                     #                      value=st.session_state.show_3d_visualization,
                     #                      key="show_3d_cb_main")
                     show_3d = st.checkbox("Show 3D Visualization",
-                                          #value=st.session_state.show_3d_visualization,
+                                          #value=st.session_state.show_3d_visualization, value = False,
                                           key="show_3d_visualization")
                     if show_3d != st.session_state.show_3d_visualization:
                         st.session_state.show_3d_visualization = show_3d
@@ -2208,7 +2208,8 @@ if st.session_state.uploaded_files:
                     if show_labels != st.session_state.show_atomic_labels:
                         st.session_state.show_atomic_labels = show_labels
 
-                    if st.session_state.show_3d_visualization:
+                    #if st.session_state.show_3d_visualization:
+                    if show_3d:
                         xyz_io = StringIO()
                         write(xyz_io, ase_to_visualize, format="xyz")
                         xyz_str = xyz_io.getvalue()
