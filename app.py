@@ -1081,7 +1081,7 @@ default_session_states = {
     'supercell_settings_applied': False, 'supercell_n_a': 1, 'supercell_n_b': 1, 'supercell_n_c': 1,
     'applied_supercell_n_a': 1, 'applied_supercell_n_b': 1, 'applied_supercell_n_c': 1,
     'applied_cell_type_name': "Conventional_Cell", 'helpful': False, 'preview_structure': None,
-    'show_3d_visualization': True, 'show_atomic_labels': False, 'generated_structures': {},
+    'show_3d_visualization': False, 'show_atomic_labels': False, 'generated_structures': {},
     'enable_batch_generation': False
 }
 for key, value in default_session_states.items():
