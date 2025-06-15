@@ -1133,7 +1133,15 @@ def set_default_conventional_representation(show_error=True):
 
 
 st.sidebar.markdown("## 🍕 XRDlicious")
+
 st.sidebar.subheader("📁📤 Upload Your Structure Files")
+
+st.sidebar.info(f"❤️🫶 **[Donations always appreciated!](https://buymeacoffee.com/bracerino)**")
+st.sidebar.info(
+"Try also the main application **[XRDlicious](xrdlicious.com)**. 📺 (Quick tutorial (in July)). Spot a bug or have a feature requests? Let us know at **lebedmi2@cvut.cz**."
+" You can consider to compile the app **locally** on your computer from **[GitHub](https://github.com/bracerino/GUI-point-defects)** for better performance."
+)
+
 uploaded_files_user_sidebar = st.sidebar.file_uploader(
     "Upload Structure Files (CIF, POSCAR, XSF, PW, CFG, ...):",
     type=None, accept_multiple_files=True, key="sidebar_uploader"
