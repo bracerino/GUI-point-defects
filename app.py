@@ -2201,7 +2201,7 @@ if st.session_state.uploaded_files:
                     #show_3d = st.checkbox("Show 3D Visualization",
                     #                      value=st.session_state.show_3d_visualization,
                     #                      key="show_3d_cb_main")
-                    show_3d = st.checkbox("Show 3D Visualization",
+                    show_3d = st.checkbox("Show 3D Visualization",)
                                           #value=st.session_state.show_3d_visualization, value = False,
                                           #key="show_3d_visualization")
                     #if show_3d != st.session_state.show_3d_visualization:
