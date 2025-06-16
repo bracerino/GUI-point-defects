@@ -2203,9 +2203,9 @@ if st.session_state.uploaded_files:
                     #                      key="show_3d_cb_main")
                     show_3d = st.checkbox("Show 3D Visualization",
                                           #value=st.session_state.show_3d_visualization, value = False,
-                                          key="show_3d_visualization")
-                    if show_3d != st.session_state.show_3d_visualization:
-                        st.session_state.show_3d_visualization = show_3d
+                                          #key="show_3d_visualization")
+                    #if show_3d != st.session_state.show_3d_visualization:
+                    #    st.session_state.show_3d_visualization = show_3d
 
                    # show_labels = st.checkbox("Show atomic labels",
                    #                           value=st.session_state.show_atomic_labels,
@@ -2383,7 +2383,7 @@ if st.session_state.uploaded_files:
                     #else:
                        # st.markdown("<b>Space Group:</b> Skipped (>500 atoms)", unsafe_allow_html=True)
 
-                if st.session_state.show_atomic_labels and st.session_state.show_3d_visualization:
+                if st.session_state.show_atomic_labels and show_3d: #st.session_state.show_3d_visualization:
                     atom_info_data = []
                     inv_cell_tbl = np.eye(3)
                     det_cell = np.linalg.det(cell_viz)
