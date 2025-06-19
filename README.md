@@ -37,6 +37,25 @@ Open your terminal console and write the following commands (the bold text):
 6) Run the XRDlicious app (always before running it, make sure to activate its Python virtual environment (Step 4):  
       **streamlit run app.py**
 
+### Tested Python packages
+Python 3.12.3
+
+- streamlit==1.45.1  
+- numpy==1.26.4  
+- matplotlib==3.10.3  
+- ase==3.25.0  
+- matminer==0.9.3  
+- pymatgen==2025.5.28  
+- py3Dmol==2.4.2  
+- plotly==6.1.1  
+- streamlit-plotly-events  
+- setuptools  
+- mp-api==0.45.3  
+- aflow==0.0.11  
+- pillow==11.2.1  
+- pymatgen.analysis.defects==2025.1.18  
+- psutil==7.0.0  
+
 ### Workflow illustration
 - Upload structure and create supercell
 - Select mode and its settings (introduce interstitials, vacancies, or substitutes). For less than 500 atoms in the structure, it is possible to select to place the defects either as far away as possible, as near as possible, or something in between these two cases using fast greedy algorithm (see the description on the application website). For higher number, it is possible to place the defects only randomly do to large computational demand.
