@@ -3,7 +3,8 @@ import psutil
 
 st.set_page_config(
     page_title="XRDlicious submodule: Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR, XYZ (with lattice)...)",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
