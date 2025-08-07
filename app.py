@@ -1,11 +1,12 @@
 import streamlit as st
-import psutil
-
 st.set_page_config(
     page_title="XRDlicious submodule: Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR, XYZ (with lattice)...)",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+
+
 
 st.markdown("""
     <style>
@@ -14,6 +15,8 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
+import psutil
 import time
 from helpers_defects import *
 
