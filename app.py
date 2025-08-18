@@ -165,7 +165,7 @@ st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crys
 col1_header, col2_header = st.columns([1.25, 1])
 with col2_header:
     st.info(
-        "🌀 Developed by [IMPLANT team](https://implant.fs.cvut.cz/). 📺 [Quick tutorial HERE.](https://www.youtube.com/watch?v=7ZgQ0fnR8dQ&ab_channel=Implantgroup)")
+        "🌀 Developed by [IMPLANT team](https://implant.fs.cvut.cz/). 📺 [Quick tutorial HERE.](https://youtu.be/qfR0GCUujf8)")
 with col1_header:
     st.info("Visit the main [XRDlicious](http://xrdlicious.com) page")
 
@@ -2449,7 +2449,10 @@ if st.session_state.uploaded_files:
             if st.button(f"Download {fmt_dl}", type="primary", key=f"dl_btn_{fmt_dl}"):
                 try:
                     if fmt_dl == "CIF":
-                        dl_content = str(CifWriter(pmg_to_visualize, symprec=0.1, refine_struct=False))
+                        if st.session_state.supercell_settings_applied or st.session_state.helpful:
+                            dl_content = str(CifWriter(pmg_to_visualize, symprec=None, refine_struct=False))
+                        else:
+                            dl_content = str(CifWriter(pmg_to_visualize, symprec=0.001, refine_struct=False))
                         dl_name = f"{base_fn_dl}_{suffix_fn}.cif"
                         dl_mime = "chemical/x-cif"
 
