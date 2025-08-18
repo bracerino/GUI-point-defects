@@ -1309,30 +1309,35 @@ if st.session_state.uploaded_files:
         if modi_lattice:
             if st.session_state.represented_structure:
                 current_lattice = st.session_state.represented_structure.lattice
-
+        
                 lattice_key_a = f"lattice_a_{st.session_state.selected_file}"
                 lattice_key_b = f"lattice_b_{st.session_state.selected_file}"
                 lattice_key_c = f"lattice_c_{st.session_state.selected_file}"
                 lattice_key_alpha = f"lattice_alpha_{st.session_state.selected_file}"
                 lattice_key_beta = f"lattice_beta_{st.session_state.selected_file}"
                 lattice_key_gamma = f"lattice_gamma_{st.session_state.selected_file}"
+        
 
-                # Initialize all session state values at once
                 if lattice_key_a not in st.session_state:
                     st.session_state[lattice_key_a] = float(current_lattice.a)
+                if lattice_key_b not in st.session_state:
                     st.session_state[lattice_key_b] = float(current_lattice.b)
+                if lattice_key_c not in st.session_state:
                     st.session_state[lattice_key_c] = float(current_lattice.c)
+                if lattice_key_alpha not in st.session_state:
                     st.session_state[lattice_key_alpha] = float(current_lattice.alpha)
+                if lattice_key_beta not in st.session_state:
                     st.session_state[lattice_key_beta] = float(current_lattice.beta)
+                if lattice_key_gamma not in st.session_state:
                     st.session_state[lattice_key_gamma] = float(current_lattice.gamma)
-
+        
                 try:
                     sga = SpacegroupAnalyzer(st.session_state.represented_structure)
                     crystal_system = sga.get_crystal_system()
                     spg_symbol = sga.get_space_group_symbol()
                     spg_number = sga.get_space_group_number()
                     st.info(f"Crystal system: **{crystal_system.upper()}** | Space group: **{spg_symbol} (#{spg_number})**")
-
+        
                     override_symmetry = st.checkbox("Override symmetry constraints (allow editing all parameters)",
                                                     value=False)
                     if override_symmetry:
@@ -1344,7 +1349,7 @@ if st.session_state.uploaded_files:
                                                     value=False)
                     if override_symmetry:
                         crystal_system = "triclinic"
-
+        
                 params_info = {
                     "cubic": {
                         "modifiable": ["a"],
@@ -1379,151 +1384,160 @@ if st.session_state.uploaded_files:
                         "info": "All parameters can be modified (system unknown)"
                     }
                 }
-
+        
                 st.markdown(params_info[crystal_system]["info"])
                 modifiable = params_info[crystal_system]["modifiable"]
-
+        
                 col_a, col_b, col_c = st.columns(3)
                 col_alpha, col_beta, col_gamma = st.columns(3)
-
+        
                 with col_a:
                     new_a = st.number_input("a (Å)",
-                                            value=float(st.session_state[f"lattice_a_{st.session_state.selected_file}"]),
                                             min_value=0.1,
                                             max_value=100.0,
                                             step=0.01,
                                             format="%.5f",
-                                            key=f"lattice_a_{st.session_state.selected_file}")
-
+                                            key=lattice_key_a) 
+        
                 with col_b:
                     if "b" in modifiable:
                         new_b = st.number_input("b (Å)",
-                                                value=float(
-                                                    st.session_state[f"lattice_b_{st.session_state.selected_file}"]),
                                                 min_value=0.1,
                                                 max_value=100.0,
                                                 step=0.01,
                                                 format="%.5f",
-                                                key=f"lattice_b_{st.session_state.selected_file}")
+                                                key=lattice_key_b)
                     else:
                         if crystal_system in ["cubic", "tetragonal", "hexagonal", "trigonal"]:
                             st.text_input("b (Å) = a", value=f"{float(new_a):.5f}", disabled=True)
                             new_b = new_a
+                            # Update session state to keep b in sync with a
+                            st.session_state[lattice_key_b] = new_a
                         else:
                             st.text_input("b (Å)", value=f"{float(current_lattice.b):.5f}", disabled=True)
                             new_b = current_lattice.b
-
+        
                 with col_c:
                     if "c" in modifiable:
                         new_c = st.number_input("c (Å)",
-                                                value=float(
-                                                    st.session_state[f"lattice_c_{st.session_state.selected_file}"]),
                                                 min_value=0.1,
                                                 max_value=100.0,
                                                 step=0.01,
                                                 format="%.5f",
-                                                key=f"lattice_c_{st.session_state.selected_file}")
+                                                key=lattice_key_c)
                     else:
                         if crystal_system == "cubic":
                             st.text_input("c (Å) = a", value=f"{float(new_a):.5f}", disabled=True)
                             new_c = new_a
+                            # Update session state to keep c in sync with a
+                            st.session_state[lattice_key_c] = new_a
                         else:
                             st.text_input("c (Å)", value=f"{float(current_lattice.c):.5f}", disabled=True)
                             new_c = current_lattice.c
-
+        
                 with col_alpha:
                     if "alpha" in modifiable:
                         new_alpha = st.number_input("α (°)",
-                                                    value=float(st.session_state[
-                                                                    f"lattice_alpha_{st.session_state.selected_file}"]),
                                                     min_value=0.1,
                                                     max_value=179.9,
                                                     step=0.1,
                                                     format="%.5f",
-                                                    key=f"lattice_alpha_{st.session_state.selected_file}")
+                                                    key=lattice_key_alpha)
                     else:
                         if crystal_system in ["cubic", "tetragonal", "orthorhombic", "hexagonal", "monoclinic"]:
                             st.text_input("α (°)", value="90.00000", disabled=True)
                             new_alpha = 90.0
+                            st.session_state[lattice_key_alpha] = 90.0
                         else:
                             st.text_input("α (°)", value=f"{float(current_lattice.alpha):.5f}", disabled=True)
                             new_alpha = current_lattice.alpha
-
+        
                 with col_beta:
                     if "beta" in modifiable:
                         new_beta = st.number_input("β (°)",
-                                                   value=float(
-                                                       st.session_state[f"lattice_beta_{st.session_state.selected_file}"]),
                                                    min_value=0.1,
                                                    max_value=179.9,
                                                    step=0.1,
                                                    format="%.5f",
-                                                   key=f"lattice_beta_{st.session_state.selected_file}")
+                                                   key=lattice_key_beta)
                     else:
                         if crystal_system in ["cubic", "tetragonal", "orthorhombic", "hexagonal"]:
                             st.text_input("β (°)", value="90.00000", disabled=True)
                             new_beta = 90.0
+                            st.session_state[lattice_key_beta] = 90.0
                         elif crystal_system == "trigonal" and "alpha" in modifiable:
                             st.text_input("β (°) = α", value=f"{float(new_alpha):.5f}", disabled=True)
                             new_beta = new_alpha
+                            st.session_state[lattice_key_beta] = new_alpha
                         else:
                             st.text_input("β (°)", value=f"{float(current_lattice.beta):.5f}", disabled=True)
                             new_beta = current_lattice.beta
-
+        
                 with col_gamma:
                     if "gamma" in modifiable:
                         new_gamma = st.number_input("γ (°)",
-                                                    value=float(st.session_state[
-                                                                    f"lattice_gamma_{st.session_state.selected_file}"]),
                                                     min_value=0.1,
                                                     max_value=179.9,
                                                     step=0.1,
                                                     format="%.5f",
-                                                    key=f"lattice_gamma_{st.session_state.selected_file}")
+                                                    key=lattice_key_gamma)
                     else:
                         if crystal_system in ["cubic", "tetragonal", "orthorhombic", "monoclinic"]:
                             st.text_input("γ (°)", value="90.00000", disabled=True)
                             new_gamma = 90.0
+                            st.session_state[lattice_key_gamma] = 90.0
                         elif crystal_system == "hexagonal":
                             st.text_input("γ (°)", value="120.00000", disabled=True)
                             new_gamma = 120.0
+                            st.session_state[lattice_key_gamma] = 120.0
                         elif crystal_system == "trigonal" and spg_symbol.startswith("R"):
                             st.text_input("γ (°) = α", value=f"{float(new_alpha):.5f}", disabled=True)
                             new_gamma = new_alpha
+                            st.session_state[lattice_key_gamma] = new_alpha
                         else:
                             st.text_input("γ (°)", value=f"{float(current_lattice.gamma):.5f}", disabled=True)
                             new_gamma = current_lattice.gamma
-
-                if st.button("Apply Lattice Changes", key="apply_lattice_changes", type = 'primary'):
+        
+                if st.button("Apply Lattice Changes", key="apply_lattice_changes", type='primary'):
                     try:
                         from pymatgen.core import Lattice
-
+        
                         new_lattice = Lattice.from_parameters(
                             a=new_a, b=new_b, c=new_c,
                             alpha=new_alpha, beta=new_beta, gamma=new_gamma
                         )
-
+        
                         frac_coords = [site.frac_coords for site in st.session_state.represented_structure.sites]
                         species = [site.species for site in st.session_state.represented_structure.sites]
-
+        
                         from pymatgen.core import Structure
-
+        
                         updated_structure = Structure(
                             lattice=new_lattice,
                             species=species,
                             coords=frac_coords,
                             coords_are_cartesian=False
                         )
-
+        
                         st.session_state.represented_structure = updated_structure.copy()
                         st.session_state.current_structure = updated_structure.copy()
                         st.session_state.preview_structure = None
                         reset_supercell_and_defect_states()
+                        
+                        # Update session state values to match the new lattice
+                        st.session_state[lattice_key_a] = float(new_lattice.a)
+                        st.session_state[lattice_key_b] = float(new_lattice.b)
+                        st.session_state[lattice_key_c] = float(new_lattice.c)
+                        st.session_state[lattice_key_alpha] = float(new_lattice.alpha)
+                        st.session_state[lattice_key_beta] = float(new_lattice.beta)
+                        st.session_state[lattice_key_gamma] = float(new_lattice.gamma)
+                        
                         st.success("Lattice parameters updated successfully!")
                         st.rerun()
-
+        
                     except Exception as e:
                         st.error(f"Error updating lattice parameters: {e}")
+
         st.info(
             f"Supercell will be built from: **{st.session_state.current_cell_representation_type}** ({len(st.session_state.represented_structure)} atoms). You can change the cell representation from the sidebar.")
 
