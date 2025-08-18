@@ -1501,40 +1501,34 @@ if st.session_state.uploaded_files:
                 if st.button("Apply Lattice Changes", key="apply_lattice_changes", type='primary'):
                     try:
                         from pymatgen.core import Lattice
-        
+                
                         new_lattice = Lattice.from_parameters(
                             a=new_a, b=new_b, c=new_c,
                             alpha=new_alpha, beta=new_beta, gamma=new_gamma
                         )
-        
+                
                         frac_coords = [site.frac_coords for site in st.session_state.represented_structure.sites]
                         species = [site.species for site in st.session_state.represented_structure.sites]
-        
+                
                         from pymatgen.core import Structure
-        
+                
                         updated_structure = Structure(
                             lattice=new_lattice,
                             species=species,
                             coords=frac_coords,
                             coords_are_cartesian=False
                         )
-        
+                
                         st.session_state.represented_structure = updated_structure.copy()
                         st.session_state.current_structure = updated_structure.copy()
                         st.session_state.preview_structure = None
                         reset_supercell_and_defect_states()
-                        
-                        # Update session state values to match the new lattice
-                        st.session_state[lattice_key_a] = float(new_lattice.a)
-                        st.session_state[lattice_key_b] = float(new_lattice.b)
-                        st.session_state[lattice_key_c] = float(new_lattice.c)
-                        st.session_state[lattice_key_alpha] = float(new_lattice.alpha)
-                        st.session_state[lattice_key_beta] = float(new_lattice.beta)
-                        st.session_state[lattice_key_gamma] = float(new_lattice.gamma)
+
+                        st.session_state.lattice_updated = True
                         
                         st.success("Lattice parameters updated successfully!")
                         st.rerun()
-        
+                
                     except Exception as e:
                         st.error(f"Error updating lattice parameters: {e}")
 
