@@ -2212,12 +2212,13 @@ if st.session_state.uploaded_files:
                     if show_3d != st.session_state.show_3d_visualization:
                         st.session_state.show_3d_visualization = show_3d
 
-                   # show_labels = st.checkbox("Show atomic labels",
-                   #                           value=st.session_state.show_atomic_labels,
-                   #                           key="show_labels_cb_main")
+                    if 'show_atomic_labels' not in st.session_state:
+                        st.session_state.show_atomic_labels = False
+                        
                     show_labels = st.checkbox("Show atomic labels",
-                                              #value=st.session_state.show_atomic_labels,
-                                              key="show_atomic_labels")
+                                              value=st.session_state.show_atomic_labels,
+                                              key="show_labels_cb_main")
+                    
                     if show_labels != st.session_state.show_atomic_labels:
                         st.session_state.show_atomic_labels = show_labels
 
