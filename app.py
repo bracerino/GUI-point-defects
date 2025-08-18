@@ -2202,14 +2202,15 @@ if st.session_state.uploaded_files:
                 col_viz, col_dl = st.columns([2, 1])
 
                 with col_viz:
-                    #show_3d = st.checkbox("Show 3D Visualization",
-                    #                      value=st.session_state.show_3d_visualization,
-                    #                      key="show_3d_cb_main")
-                    show_3d = st.checkbox("Show 3D Visualization",)
-                                          #value=st.session_state.show_3d_visualization, value = False,
-                                          #key="show_3d_visualization")
-                    #if show_3d != st.session_state.show_3d_visualization:
-                    #    st.session_state.show_3d_visualization = show_3d
+                    if 'show_3d_visualization' not in st.session_state:
+                        st.session_state.show_3d_visualization = False
+                    
+                    show_3d = st.checkbox("Show 3D Visualization",
+                                          value=st.session_state.show_3d_visualization,
+                                          key="show_3d_cb_main")
+                    
+                    if show_3d != st.session_state.show_3d_visualization:
+                        st.session_state.show_3d_visualization = show_3d
 
                    # show_labels = st.checkbox("Show atomic labels",
                    #                           value=st.session_state.show_atomic_labels,
