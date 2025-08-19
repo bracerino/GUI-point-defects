@@ -167,11 +167,11 @@ with col2_header:
     st.info(
         "🌀 Developed by [IMPLANT team](https://implant.fs.cvut.cz/). 📺 [Quick tutorial HERE.](https://youtu.be/cPp-NPxhAYQ)")
 with col1_header:
-    with st.expander("How to Cite", icon="📚", expanded=True):
+    with st.expander("How to Cite", icon="📚", expanded=False):
         st.markdown("""
         ### How to Cite
 
-        Please cite the following sources based on the application usage:
+        Please cite the following sources:
 
         ---
         - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
