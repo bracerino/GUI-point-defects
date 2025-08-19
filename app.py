@@ -177,7 +177,7 @@ with col1_header:
         - **XRDlicious, 2025** – [Lebeda, Miroslav, et al. XRDlicious: an interactive web-based platform for online calculation of diffraction patterns and radial distribution functions from crystal structures. Applied Crystallography, 2025, 58.5.](https://doi.org/10.1107/S1600576725005370).
         - **pymatgen** – [S. P. Ong et al., pymatgen: A robust, open-source python library for materials analysis, Comput. Mater. Sci. 68, 314 (2013)](https://www.sciencedirect.com/science/article/abs/pii/S0927025612006295).
         - **ASE (Atomic Simulation Environment)** – [A. H. Larsen et al., The Atomic Simulation Environment: A Python library for working with atoms, J. Phys.: Condens. Matter 29, 273002 (2017)](https://iopscience.iop.org/article/10.1088/1361-648X/aa680e).
-
+        """)
 
 
 show_database_search = st.checkbox("Enable database search",
