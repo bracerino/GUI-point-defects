@@ -1,5 +1,5 @@
 # XRDlicious-point-defects 
-[XRDlicious](http://xrdlicious.com/) submodule for creating random point defects (interstitials, substitutes, vacancies) in crystal structures. Try it here: [xrdlicious-point-defects.streamlit.app/](https://xrdlicious-point-defects.streamlit.app.  
+[XRDlicious](http://xrdlicious.com/) submodule for creating random point defects (interstitials, substitutes, vacancies) in crystal structures. Try it here: [xrdlicious-point-defects.streamlit.app/](https://xrdlicious-point-defects.streamlit.app).  
 Video tutorial at [YouTube](https://www.youtube.com/watch?v=cPp-NPxhAYQ&t=6s&ab_channel=Implantgroup).
 
 ![Point defects module illustration](Point_Defects_Module/point_defects_1.png)
