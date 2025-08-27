@@ -13,3 +13,4 @@ aflow==0.0.11
 pillow==11.2.1
 pymatgen.analysis.defects==2025.1.18
 psutil==7.0.0
+requests==2.32.5
