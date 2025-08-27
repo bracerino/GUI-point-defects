@@ -165,7 +165,8 @@ st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crys
 col1_header, col2_header = st.columns([1.25, 1])
 with col2_header:
     st.info(
-        "🌀 Developed by [IMPLANT team](https://implant.fs.cvut.cz/). 📺 [Quick tutorial HERE.](https://youtu.be/cPp-NPxhAYQ)")
+        "🌀 Developed by [IMPLANT team](https://implant.fs.cvut.cz/). 📺 [Tutorial HERE.](https://youtu.be/cPp-NPxhAYQ).
+        "If you like the app, please cite **[article in IUCr](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html).** "")
 with col1_header:
     with st.expander("How to Cite", icon="📚", expanded=False):
         st.markdown("""
