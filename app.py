@@ -181,7 +181,7 @@ with col1_header:
         """)
 
 
-show_database_search = st.checkbox("Enable database search",
+show_database_search = st.checkbox("Enable **database** search (MP, AFLOW, COD)",
                                    value=False,
                                    help="Enable to search in Materials Project, AFLOW, and COD databases")
 
