@@ -1742,7 +1742,7 @@ if st.session_state.uploaded_files:
                     int_el = int_c1.text_input("Element", "N", key="int_el_voronoi")
                     int_n = int_c2.number_input("# Insert", 1, key="int_n_voronoi")
                     int_type_idx = int_c3.number_input("Site Type (0=all)", 0, key="int_type_idx")
-                    show_equiv_sites = int_c3.st.checkbox(f"Show Equivalent Sites for Type {i_type + 1}", key=f"equiv_sites_{i_type}")
+                    show_equiv_sites = int_c3.checkbox(f"Show Equivalent Sites for Type {i_type + 1}", key=f"equiv_sites_{i_type}")
                     int_c4, int_c5, int_c6 = st.columns(3)
                     int_mode = int_c4.selectbox("Mode", ["farthest", "nearest", "moderate"], 0, key="int_mode")
                     int_clust = int_c5.number_input("Clust Tol.", 0.75, step=0.05, format="%.2f", key="int_clust")
