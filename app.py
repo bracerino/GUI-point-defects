@@ -2127,6 +2127,16 @@ if st.session_state.uploaded_files:
                                                     st.write(f"  Equivalent sites: {equiv_sites_count}")
                                                     st.write("---")
 
+                                                    show_equiv_sites = st.checkbox(f"Show Equivalent Sites for Type {i_type + 1}", key=f"equiv_sites_{i_type}")
+                                    
+                                                    if show_equiv_sites:
+                                                        st.write("Equivalent Sites:")
+                                                        for eq_site in interstitial_type_obj.equivalent_sites:
+                                                            eq_site_coords = eq_site.frac_coords
+                                                            st.write(f"  - {np.round(eq_site_coords, 4)}")
+                
+                                                    st.write("---")
+
                                                 st.info(f"**Total available interstitial sites: {total_sites}**")
 
                                                 if int_type_idx == 0:
