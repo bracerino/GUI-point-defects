@@ -110,7 +110,7 @@ def get_structure_info(structure):
 
     atom_count = len(structure)
     ase_atoms = AseAtomsAdaptor.get_atoms(structure)
-    cell_params = ase_atoms.get_cell_lengths_and_angles()
+    cell_params = ase_atoms.cell.cellpar()
     volume = ase_atoms.get_volume()
 
     info_text = f"(**{atom_count} atoms)**\n"
@@ -126,7 +126,7 @@ def get_structure_info(structure):
     info_text += f"a={cell_params[0]:.3f} Å, b={cell_params[1]:.3f} Å, c={cell_params[2]:.3f} Å\n"
     info_text += f"α={cell_params[3]:.1f}°, β={cell_params[4]:.1f}°, γ={cell_params[5]:.1f}°\n"
     info_text += f"Vol={volume:.2f} Å³"
-
+    print(f"Successfully uploaded structure {}".format(info_text))
     return info_text
 
 
