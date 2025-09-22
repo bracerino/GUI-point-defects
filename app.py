@@ -165,7 +165,7 @@ st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crys
 col1_header, col2_header = st.columns([1.25, 1])
 with col2_header:
     st.info(
-        "🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. 📺 **[Tutorial HERE](https://youtu.be/cPp-NPxhAYQ)**."
+        "🌀 Developed by **[IMPLANT team](https://implant.fs.cvut.cz/)**. 📺 **[Tutorial at YouTube](https://youtu.be/cPp-NPxhAYQ)**. "
         "If you like the app, please cite our **[article in IUCr](https://journals.iucr.org/j/issues/2025/05/00/hat5006/index.html).**")
 with col1_header:
     with st.expander("How to Cite", icon="📚", expanded=False):
@@ -1153,7 +1153,7 @@ st.sidebar.subheader("📁📤 Upload Your Structure Files")
 
 st.sidebar.info(f"❤️🫶 **[Donations always appreciated!](https://buymeacoffee.com/bracerino)**")
 st.sidebar.info(
-"Try also the main application **[XRDlicious](xrdlicious.com)**. 📺 (Quick tutorial (in July)). Spot a bug or have a feature requests? Let us know at **lebedmi2@cvut.cz**."
+"Try also the main application **[XRDlicious](https://xrdlicious.com)**. Spot a bug or have a feature requests? Let us know at **lebedmi2@cvut.cz**."
 " You can consider to compile the app **locally** on your computer from **[GitHub](https://github.com/bracerino/GUI-point-defects)** for better performance."
 )
 
