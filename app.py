@@ -2225,7 +2225,7 @@ if st.session_state.uploaded_files:
 
                 with col_viz:
                     if 'show_3d_visualization' not in st.session_state:
-                        st.session_state.show_3d_visualization = False
+                        st.session_state.show_3d_visualization = True
                     
                     show_3d = st.checkbox("Show 3D Visualization",
                                           value=st.session_state.show_3d_visualization,
