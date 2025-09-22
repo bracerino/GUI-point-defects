@@ -2337,7 +2337,7 @@ if st.session_state.uploaded_files:
                                 st.error("No structure available for analysis")
 
                     with col_sg_apply:
-                        if st.button("⚙️ Apply Standard Symmetry", key="apply_symmetry_btn", type = 'secondary',
+                        if st.button("⚙️ Apply Symmetry", key="apply_symmetry_btn", type = 'secondary',
                                      ):
                             if pmg_to_visualize:
                                 with st.spinner("Applying standard symmetry..."):
