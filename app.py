@@ -2287,7 +2287,7 @@ if st.session_state.uploaded_files:
                     col_sg_analysis, col_sg_apply = st.columns(2)
                     with col_sg_analysis:
                         if st.button("🔍 Determine Space Group", key="determine_sg_btn", type='secondary',
-                                     help="Analyze current structure symmetry"):
+                                     ):
                             if pmg_to_visualize:
                                 with st.spinner("Analyzing symmetry..."):
                                     try:
@@ -2338,7 +2338,7 @@ if st.session_state.uploaded_files:
 
                     with col_sg_apply:
                         if st.button("⚙️ Apply Standard Symmetry", key="apply_symmetry_btn", type = 'secondary',
-                                     help="Convert to standard conventional cell"):
+                                     ):
                             if pmg_to_visualize:
                                 with st.spinner("Applying standard symmetry..."):
                                     try:
