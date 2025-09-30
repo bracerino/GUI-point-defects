@@ -1147,7 +1147,47 @@ def set_default_conventional_representation(show_error=True):
     return False
 
 
-st.sidebar.markdown("## 🍕 XRDlicious")
+#st.sidebar.markdown("## 🍕 XRDlicious")
+
+st.markdown(
+    """
+    <style>
+        /* Sidebar background with subtle gradient */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(
+                180deg,
+                rgba(155, 89, 182, 0.35),   /* soft purple */
+                rgba(52, 152, 219, 0.35)    /* soft blue */
+            );
+            backdrop-filter: blur(6px);  /* adds a glass effect */
+        }
+
+        /* Custom caption style */
+        .sidebar-caption {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: inherit;
+            margin: 1rem 0 0.5rem 0;
+            position: relative;
+            display: inline-block;
+        }
+
+        .sidebar-caption::after {
+            content: "";
+            display: block;
+            width: 100%;
+            height: 3px;
+            margin-top: 4px;
+            border-radius: 2px;
+            background: linear-gradient(to right, #6a11cb, #2575fc);  /* vivid purple → blue */
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# Sidebar content
+st.sidebar.markdown('<div class="sidebar-caption">🍕 XRDlicious, point defects</div>', unsafe_allow_html=True)
 
 
 
