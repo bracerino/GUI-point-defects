@@ -1152,12 +1152,12 @@ def set_default_conventional_representation(show_error=True):
 st.markdown(
     """
     <style>
-        /* Sidebar background with subtle gradient */
+        /* Sidebar background with subtle, more transparent gradient */
         [data-testid="stSidebar"] {
             background: linear-gradient(
                 180deg,
-                rgba(155, 89, 182, 0.35),   /* soft purple */
-                rgba(52, 152, 219, 0.35)    /* soft blue */
+                rgba(155, 89, 182, 0.15),   /* very soft purple */
+                rgba(52, 152, 219, 0.15)    /* very soft blue */
             );
             backdrop-filter: blur(6px);  /* adds a glass effect */
         }
@@ -1179,14 +1179,14 @@ st.markdown(
             height: 3px;
             margin-top: 4px;
             border-radius: 2px;
-            background: linear-gradient(to right, #6a11cb, #2575fc);  /* vivid purple → blue */
+            background: linear-gradient(to right, #6a11cb, #2575fc);  /* vivid purple → blue underline */
         }
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Sidebar content
+
 st.sidebar.markdown('<div class="sidebar-caption">🍕 XRDlicious, point defects</div>', unsafe_allow_html=True)
 
 
