@@ -1988,7 +1988,7 @@ if st.session_state.uploaded_files:
 
                     with batch_col1:
                         st.markdown("##### Generate Multiple Configurations")
-                        n_configurations = st.number_input("Number of configurations", 1, 50, 10, 1, key="n_configs")
+                        n_configurations = st.number_input("Number of configurations", 1, 500, 10, 1, key="n_configs")
                         starting_seed = st.number_input("Starting random seed", 0, 9999, 42, 1, key="start_seed")
 
                         if st.button("🎲 Generate Multiple Defect Configurations", key="generate_batch_btn", type = 'primary'):
