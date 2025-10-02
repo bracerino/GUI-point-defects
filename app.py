@@ -1862,7 +1862,7 @@ if st.session_state.uploaded_files:
                                             min_value=0.000,
                                             max_value=100.000,
                                             value=0.000,
-                                            step=0.001,
+                                            step=0.010,
                                             key=f"vac_perc_{el_v}",
                                             help=f"Remove percentage of {el_count} {el_v} atoms"
                                         )
@@ -1923,10 +1923,10 @@ if st.session_state.uploaded_files:
                             with sub_col1:
                                 sub_p = st.slider(
                                     f"Percentage of {el_s} to substitute",
-                                    min_value=0.0,
-                                    max_value=100.0,
-                                    value=0.0,
-                                    step=0.1,
+                                    min_value=0.00,
+                                    max_value=100.00,
+                                    value=0.00,
+                                    step=0.01,
                                     key=f"sub_p_{el_s}",
                                     help=f"Substitute percentage of {el_count_s} {el_s} atoms"
                                 )
