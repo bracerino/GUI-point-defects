@@ -1859,10 +1859,10 @@ if st.session_state.uploaded_files:
                                     with vac_perc_cols[c_idx]:
                                         vac_percent[el_v] = st.slider(
                                             f"% {el_v} (total: {el_count})",
-                                            min_value=0.00,
-                                            max_value=100.00,
-                                            value=0.00,
-                                            step=0.10,
+                                            min_value=0.000,
+                                            max_value=100.000,
+                                            value=0.000,
+                                            step=0.001,
                                             key=f"vac_perc_{el_v}",
                                             help=f"Remove percentage of {el_count} {el_v} atoms"
                                         )
