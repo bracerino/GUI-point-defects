@@ -81,6 +81,39 @@ from scipy.optimize import differential_evolution
 import warnings
 
 
+def find_octahedral_sites(structure, min_distance=1.5):
+    from pymatgen.core import Element
+
+    frac_coords = structure.frac_coords
+    potential_sites = []
+
+    for i in [0, 0.5]:
+        for j in [0, 0.5]:
+            for k in [0, 0.5]:
+                if (i, j, k) != (0, 0, 0) and (i, j, k) != (0.5, 0.5, 0.5):
+                    site = np.array([i, j, k])
+
+                    min_dist_to_atoms = float('inf')
+                    for atom_coord in frac_coords:
+                        delta = site - atom_coord
+                        delta = delta - np.round(delta)
+                        dist = np.linalg.norm(np.dot(delta, structure.lattice.matrix))
+                        min_dist_to_atoms = min(min_dist_to_atoms, dist)
+
+                    if min_dist_to_atoms >= min_distance:
+                        potential_sites.append(site)
+
+    return potential_sites
+
+
+class ManualInterstitialType:
+    def __init__(self, sites, site_type="Octahedral"):
+        self.site_type = site_type
+        self.equivalent_sites = [type('obj', (object,), {'frac_coords': site})() for site in sites]
+        if sites:
+            self.site = type('obj', (object,), {'frac_coords': sites[0]})()
+        else:
+            self.site = None
 def periodic_distance(coord1: np.ndarray, coord2: np.ndarray) -> float:
     delta = coord1 - coord2
     delta = delta - np.round(delta)
@@ -2270,30 +2303,41 @@ def insert_interstitials_ase_fast(structure_obj, interstitial_element, n_interst
                                                     min_distance, min_interstitial_distance, log_area, random_seed)
 
 
-
-
 def insert_interstitials_into_structure(structure_obj, interstitial_element, n_interstitials,
                                         which_interstitial_type_idx=0, mode="farthest",
-                                        clustering_tol_val=0.75, min_dist_val=0.5, target_value=0.5, log_area=None,
-                                        random_seed=None):
+                                        clustering_tol_val=0.75, min_dist_val=0.5, target_value=0.5,
+                                        log_area=None, random_seed=None, include_manual_sites=True):
     from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
 
     if log_area: log_area.info(f"Attempting to insert {n_interstitials} of {interstitial_element}...")
     new_structure_int = structure_obj.copy()
+
     try:
         generator = VoronoiInterstitialGenerator(clustering_tol=clustering_tol_val, min_dist=min_dist_val)
         unique_interstitial_types = list(generator.generate(new_structure_int, "H"))
+
+        if include_manual_sites:
+            manual_sites = find_octahedral_sites(new_structure_int, min_distance=min_dist_val)
+            if manual_sites:
+                manual_type = ManualInterstitialType(manual_sites, site_type="Octahedral (Manual)")
+                unique_interstitial_types.append(manual_type)
+                if log_area:
+                    log_area.write(f"Added manual octahedral sites as Type {len(unique_interstitial_types)}")
+
         if not unique_interstitial_types:
-            if log_area: log_area.warning("VoronoiInterstitialGenerator found no candidate sites.")
+            if log_area: log_area.warning("No candidate sites found.")
             return new_structure_int
+
         if log_area:
             log_area.write(f"Found {len(unique_interstitial_types)} unique interstitial site types.")
             for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
                 site_label = classify_interstitial_site(new_structure_int, interstitial_type_obj.site.frac_coords)
+                type_name = getattr(interstitial_type_obj, 'site_type', 'Voronoi')
                 log_area.write(
-                    f"  Type {i_type + 1}: at {np.round(interstitial_type_obj.site.frac_coords, 3)}, {site_label}, with {len(interstitial_type_obj.equivalent_sites)} equivalent sites.")
+                    f"  Type {i_type + 1} ({type_name}): at {np.round(interstitial_type_obj.site.frac_coords, 3)}, {site_label}, with {len(interstitial_type_obj.equivalent_sites)} equivalent sites.")
 
         frac_coords_to_consider = []
+
         if which_interstitial_type_idx == 0:
             for interstitial_type_obj in unique_interstitial_types:
                 for eq_site in interstitial_type_obj.equivalent_sites:
@@ -2306,17 +2350,17 @@ def insert_interstitials_into_structure(structure_obj, interstitial_element, n_i
                 f"Focusing on interstitial type {which_interstitial_type_idx} ({len(frac_coords_to_consider)} sites).")
         else:
             if log_area: log_area.warning(
-                f"Invalid interstitial type index: {which_interstitial_type_idx}. Max is {len(unique_interstitial_types)}. Using no sites.")
+                f"Invalid interstitial type index: {which_interstitial_type_idx}. Max is {len(unique_interstitial_types)}.")
             return new_structure_int
 
         if not frac_coords_to_consider:
-            if log_area: log_area.warning("No interstitial sites available to select from based on criteria.")
+            if log_area: log_area.warning("No interstitial sites available to select from.")
             return new_structure_int
 
         num_to_actually_insert = min(n_interstitials, len(frac_coords_to_consider))
         if num_to_actually_insert < n_interstitials and log_area:
             log_area.warning(
-                f"Requested {n_interstitials} interstitials, but only {num_to_actually_insert} sites are available. Inserting {num_to_actually_insert}.")
+                f"Requested {n_interstitials} interstitials, but only {num_to_actually_insert} sites are available.")
 
         if num_to_actually_insert > 0:
             selected_points_coords, _ = select_spaced_points(frac_coords_to_consider, num_to_actually_insert, mode,
@@ -2336,8 +2380,10 @@ def insert_interstitials_into_structure(structure_obj, interstitial_element, n_i
                 f"Successfully inserted {len(selected_points_coords)} {interstitial_element} atoms.")
         else:
             if log_area: log_area.info("No interstitials were inserted based on parameters.")
+
     except Exception as e_int:
         if log_area: log_area.error(f"Error during interstitial insertion: {e_int}")
+
     return new_structure_int
 
 
