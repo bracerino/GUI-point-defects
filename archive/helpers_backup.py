@@ -72,6 +72,186 @@ ELEMENTS = [
 ]
 
 
+
+import numpy as np
+import itertools
+import random
+import time
+from scipy.optimize import differential_evolution
+import warnings
+
+
+def periodic_distance(coord1: np.ndarray, coord2: np.ndarray) -> float:
+    delta = coord1 - coord2
+    delta = delta - np.round(delta)
+    return np.linalg.norm(delta)
+
+
+def select_spaced_points_global_exact(frac_coords_list, n_points, mode="farthest", target_value=0.5, random_seed=None):
+    if random_seed is not None:
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    n_available = len(frac_coords_list)
+    if n_available <= n_points:
+        return frac_coords_list.copy(), list(range(n_available))
+
+    from math import comb
+    total_combinations = comb(n_available, n_points)
+    st.info(f"Total combinations: {total_combinations}")
+    if total_combinations > 1000000:
+        raise ValueError(f"Too many combinations for exact algorithm. Use iterative or genetic instead.")
+
+    best_selection = None
+    best_min_distance = 0
+
+    for combination in itertools.combinations(range(n_available), n_points):
+        selected_coords = [frac_coords_list[i] for i in combination]
+
+        min_pairwise_dist = float('inf')
+        for i in range(len(selected_coords)):
+            for j in range(i + 1, len(selected_coords)):
+                dist = periodic_distance(selected_coords[i], selected_coords[j])
+                min_pairwise_dist = min(min_pairwise_dist, dist)
+
+        if min_pairwise_dist > best_min_distance:
+            best_min_distance = min_pairwise_dist
+            best_selection = combination
+
+    if best_selection is None:
+        best_selection = tuple(range(n_points))
+
+    selected_coords = [frac_coords_list[i] for i in best_selection]
+    return selected_coords, list(best_selection)
+
+
+def select_spaced_points_genetic(frac_coords_list, n_points, mode="farthest", target_value=0.5, random_seed=None):
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    n_available = len(frac_coords_list)
+    if n_available <= n_points:
+        return frac_coords_list.copy(), list(range(n_available))
+
+    coords_array = np.array(frac_coords_list)
+
+    def objective_function(selection_weights):
+        selected_indices = np.argsort(selection_weights)[-n_points:]
+        min_dist = float('inf')
+        for i in range(len(selected_indices)):
+            for j in range(i + 1, len(selected_indices)):
+                idx1, idx2 = selected_indices[i], selected_indices[j]
+                dist = periodic_distance(coords_array[idx1], coords_array[idx2])
+                min_dist = min(min_dist, dist)
+        return -min_dist
+
+    bounds = [(0, 1) for _ in range(n_available)]
+
+    max_iter = min(1000, max(100, n_available * 10))
+    pop_size = min(50, max(15, n_available // 2))
+
+    result = differential_evolution(
+        objective_function, bounds, maxiter=max_iter,
+        popsize=pop_size, seed=random_seed, disp=False
+    )
+
+    best_weights = result.x
+    selected_indices = np.argsort(best_weights)[-n_points:]
+    selected_indices = sorted(selected_indices)
+
+    selected_coords = [frac_coords_list[i] for i in selected_indices]
+    return selected_coords, list(selected_indices)
+
+
+def select_spaced_points_iterative(frac_coords_list, n_points, mode="farthest", target_value=0.5, random_seed=None):
+    if random_seed is not None:
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    n_available = len(frac_coords_list)
+    if n_available <= n_points:
+        return frac_coords_list.copy(), list(range(n_available))
+
+    selected_coords, selected_indices = select_spaced_points_original(
+        frac_coords_list, n_points, mode, target_value, random_seed
+    )
+
+    def calculate_min_pairwise_distance(indices):
+        min_dist = float('inf')
+        for i in range(len(indices)):
+            for j in range(i + 1, len(indices)):
+                dist = periodic_distance(frac_coords_list[indices[i]], frac_coords_list[indices[j]])
+                min_dist = min(min_dist, dist)
+        return min_dist
+
+    current_min_dist = calculate_min_pairwise_distance(selected_indices)
+
+    # Iterative improvement
+    max_iterations = min(1000, n_available * 5)
+    for iteration in range(max_iterations):
+        improved = False
+        unselected_indices = [i for i in range(n_available) if i not in selected_indices]
+
+        for sel_idx in range(len(selected_indices)):
+            for unsel_idx in unselected_indices:
+                new_selection = selected_indices.copy()
+                new_selection[sel_idx] = unsel_idx
+                new_min_dist = calculate_min_pairwise_distance(new_selection)
+
+                if new_min_dist > current_min_dist:
+                    selected_indices = new_selection
+                    current_min_dist = new_min_dist
+                    improved = True
+                    break
+            if improved:
+                break
+
+        if not improved:
+            break
+
+    selected_coords = [frac_coords_list[i] for i in selected_indices]
+    return selected_coords, selected_indices
+
+
+def select_spaced_points_adaptive(frac_coords_list, n_points, mode="farthest", target_value=0.5, random_seed=None):
+    n_available = len(frac_coords_list)
+
+    if n_available <= 12:
+        return select_spaced_points_global_exact(frac_coords_list, n_points, mode, target_value, random_seed)
+    elif n_available <= 50:
+        return select_spaced_points_iterative(frac_coords_list, n_points, mode, target_value, random_seed)
+    elif n_available <= 200:
+        return select_spaced_points_genetic(frac_coords_list, n_points, mode, target_value, random_seed)
+    else:
+        return select_spaced_points_original(frac_coords_list, n_points, mode, target_value, random_seed)
+
+
+def select_spaced_points(frac_coords_list, n_points, mode, target_value=0.5, random_seed=None):
+    if not frac_coords_list or n_points == 0:
+        return [], []
+
+    try:
+        algorithm = st.session_state.get('point_selection_algorithm', 'original')
+    except:
+        algorithm = 'original'
+    if algorithm == "original":
+        return select_spaced_points_original(frac_coords_list, n_points, mode, target_value, random_seed)
+
+    elif algorithm == "iterative":
+        return select_spaced_points_iterative(frac_coords_list, n_points, mode, target_value, random_seed)
+
+    elif algorithm == "genetic":
+        return select_spaced_points_genetic(frac_coords_list, n_points, mode, target_value, random_seed)
+
+    elif algorithm == "global_exact":
+        return select_spaced_points_global_exact(frac_coords_list, n_points, mode, target_value, random_seed)
+
+    elif algorithm == "adaptive":
+        return select_spaced_points_adaptive(frac_coords_list, n_points, mode, target_value, random_seed)
+
+    else:
+        return select_spaced_points_original(frac_coords_list, n_points, mode, target_value, random_seed)
+
 def get_formula_type(formula):
     elements = []
     counts = []
@@ -1375,7 +1555,11 @@ def select_spaced_points_original(frac_coords_list, n_points, mode, target_value
         selected_coords_out = frac_coords_list.copy()
         return selected_coords_out, selected_indices
 
-    if mode == "farthest":
+    if mode == "random":
+        import random
+        selected_indices = random.sample(range(n_available), n_points)
+
+    elif mode == "farthest":
         dist_matrix = compute_periodic_distance_matrix(frac_coords_array)
         selected_indices = []
 
@@ -1500,14 +1684,9 @@ from typing import List, Tuple, Optional
 
 
 def compute_periodic_distance_matrix_optimized(frac_coords, max_distance=None):
-    """
-    Optimized distance matrix computation with early termination
-    """
-    n = len(frac_coords)
 
-    # For very large datasets, use sparse representation
+    n = len(frac_coords)
     if n > 10000 and max_distance is not None:
-        # Only compute distances up to max_distance
         from scipy.sparse import lil_matrix
         dist_matrix = lil_matrix((n, n))
 
@@ -1520,7 +1699,6 @@ def compute_periodic_distance_matrix_optimized(frac_coords, max_distance=None):
                     dist_matrix[i, j] = dist_matrix[j, i] = dist
         return dist_matrix.tocsr()
     else:
-        # Standard computation for smaller datasets
         dist_matrix = np.zeros((n, n))
         for i in range(n):
             for j in range(i + 1, n):
@@ -1534,9 +1712,6 @@ def compute_periodic_distance_matrix_optimized(frac_coords, max_distance=None):
 def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
                                      target_value=0.5, random_seed=None,
                                      min_distance_threshold=0.1):
-    """
-    Fast selection using KDTree for nearest neighbor queries
-    """
     if not frac_coords_list or n_points == 0:
         return [], []
 
@@ -1549,10 +1724,7 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
 
     if n_available <= n_points:
         return frac_coords_list.copy(), list(range(n_available))
-
-    # For very large datasets, use clustering pre-selection
     if n_available > 50000:
-        # Pre-cluster to reduce search space
         n_clusters = min(n_points * 10, n_available // 10)
         kmeans = KMeans(n_clusters=n_clusters, random_state=random_seed, n_init=10)
         cluster_labels = kmeans.fit_predict(frac_coords_array)
@@ -1573,9 +1745,6 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
     else:
         available_indices = list(range(n_available))
 
-    # Build KDTree for fast neighbor queries
-    # For periodic boundary conditions, we need to handle wrapping
-    # Create extended coordinates for periodic boundaries
     extended_coords = []
     extended_indices = []
 
@@ -1592,7 +1761,6 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
     selected_indices = []
 
     if mode == "random":
-        # Simple random selection with distance checking
         attempts = 0
         max_attempts = min(n_available * 5, 100000)
 
@@ -1605,7 +1773,6 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
             else:
                 candidate_coord = frac_coords_array[candidate_idx]
 
-                # Query nearest neighbors
                 distances, _ = tree.query(candidate_coord, k=len(selected_indices) + 1)
                 min_dist_to_selected = np.min(distances[1:])  # Exclude self
 
@@ -1613,7 +1780,6 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
                     selected_indices.append(available_indices[candidate_idx])
 
     elif mode == "farthest":
-        # Greedy farthest point selection
         start_idx = random.randint(0, n_available - 1) if random_seed is not None else 0
         selected_indices.append(available_indices[start_idx])
 
@@ -1628,14 +1794,11 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
 
             for candidate_idx in remaining_indices:
                 candidate_coord = frac_coords_array[candidate_idx]
-
-                # Query distances to selected points
                 min_dist_to_selected = float('inf')
                 for sel_global_idx in selected_indices:
                     sel_local_idx = available_indices.index(sel_global_idx)
                     sel_coord = frac_coords_array[sel_local_idx]
 
-                    # Compute periodic distance
                     delta = candidate_coord - sel_coord
                     delta = delta - np.round(delta)
                     dist = np.linalg.norm(delta)
@@ -1648,7 +1811,6 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
             selected_indices.append(available_indices[best_idx])
 
     elif mode == "nearest":
-        # Greedy nearest point selection
         start_idx = random.randint(0, n_available - 1) if random_seed is not None else 0
         selected_indices.append(available_indices[start_idx])
 
@@ -1663,14 +1825,11 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
 
             for candidate_idx in remaining_indices:
                 candidate_coord = frac_coords_array[candidate_idx]
-
-                # Query distances to selected points
                 min_dist_to_selected = float('inf')
                 for sel_global_idx in selected_indices:
                     sel_local_idx = available_indices.index(sel_global_idx)
                     sel_coord = frac_coords_array[sel_local_idx]
 
-                    # Compute periodic distance
                     delta = candidate_coord - sel_coord
                     delta = delta - np.round(delta)
                     dist = np.linalg.norm(delta)
@@ -1683,14 +1842,13 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
             selected_indices.append(available_indices[best_idx])
 
     else:  # moderate
-        # Use clustering for moderate selection
+
         if n_available > 1000:
-            # Use KMeans clustering
+
             kmeans = KMeans(n_clusters=n_points, random_state=random_seed, n_init=10)
             cluster_labels = kmeans.fit_predict(frac_coords_array)
             cluster_centers = kmeans.cluster_centers_
 
-            # Find closest actual points to cluster centers
             for center in cluster_centers:
                 distances = np.linalg.norm(frac_coords_array - center, axis=1)
                 closest_idx = np.argmin(distances)
@@ -1699,16 +1857,12 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
                 if len(selected_indices) >= n_points:
                     break
         else:
-            # Fall back to original algorithm for smaller datasets
             return select_spaced_points_original(frac_coords_list, n_points, mode,
                                                  target_value, random_seed)
 
-    # Convert back to original coordinate system
     if n_available > 50000:
-        # We used clustered indices
         selected_coords_out = [frac_coords_list[i] for i in selected_indices]
     else:
-        # Direct mapping
         selected_coords_out = [frac_coords_list[available_indices.index(i)]
                                for i in selected_indices]
         selected_indices = [available_indices.index(i) for i in selected_indices]
@@ -1718,9 +1872,6 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
 
 def select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
                                       target_value=0.5, random_seed=None):
-    """
-    Hierarchical selection for very large datasets
-    """
     if not frac_coords_list or n_points == 0:
         return [], []
 
@@ -1732,20 +1883,14 @@ def select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
 
     if n_available <= n_points:
         return frac_coords_list.copy(), list(range(n_available))
-
-    # For very large datasets, use hierarchical approach
     if n_available > 10000:
-        # Level 1: Random subsampling
         subsample_size = min(10000, n_available)
         subsample_indices = np.random.choice(n_available, subsample_size, replace=False)
         subsample_coords = [frac_coords_list[i] for i in subsample_indices]
 
-        # Level 2: Apply selection algorithm on subsample
         selected_coords, selected_local_indices = select_spaced_points_fast_kdtree(
-            subsample_coords, n_points, mode, target_value, random_seed
-        )
+            subsample_coords, n_points, mode, target_value, random_seed)
 
-        # Map back to original indices
         selected_indices = [subsample_indices[i] for i in selected_local_indices]
 
         return selected_coords, selected_indices
@@ -1756,9 +1901,7 @@ def select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
 
 def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
                                     grid_resolution=10, random_seed=None):
-    """
-    Grid-based selection for uniform distribution
-    """
+
     if not frac_coords_list or n_points == 0:
         return [], []
 
@@ -1772,12 +1915,10 @@ def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
     if n_available <= n_points:
         return frac_coords_list.copy(), list(range(n_available))
 
-    # Create 3D grid
     grid_points = {}
     point_to_grid = {}
 
     for i, coord in enumerate(frac_coords_array):
-        # Map to grid cell
         grid_cell = tuple(np.floor(coord * grid_resolution).astype(int))
         if grid_cell not in grid_points:
             grid_points[grid_cell] = []
@@ -1787,7 +1928,6 @@ def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
     selected_indices = []
 
     if mode == "random":
-        # Random selection with grid constraint
         available_cells = list(grid_points.keys())
         random.shuffle(available_cells)
 
@@ -1799,17 +1939,14 @@ def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
             selected_indices.append(selected_idx)
 
     elif mode in ["farthest", "nearest", "moderate"]:
-        # Select one point per grid cell first, then apply algorithm
         grid_representatives = []
         grid_rep_indices = []
 
         for cell, cell_points in grid_points.items():
-            # Select representative point from each cell
             rep_idx = random.choice(cell_points)
             grid_representatives.append(frac_coords_list[rep_idx])
             grid_rep_indices.append(rep_idx)
 
-        # Apply selection algorithm on grid representatives
         if len(grid_representatives) <= n_points:
             selected_coords = grid_representatives
             selected_indices = grid_rep_indices
@@ -1823,82 +1960,6 @@ def select_spaced_points_grid_based(frac_coords_list, n_points, mode,
     return selected_coords_out, selected_indices
 
 
-
-# Example usage and performance comparison
-def benchmark_selection_methods():
-    """
-    Benchmark different selection methods
-    """
-    import time
-
-    # Generate test data
-    n_test_points = [1000, 5000, 10000, 50000]
-    n_select = 100
-
-    results = {}
-
-    for n in n_test_points:
-        print(f"\nTesting with {n} points, selecting {n_select}:")
-
-        # Generate random fractional coordinates
-        test_coords = np.random.rand(n, 3).tolist()
-
-        methods = [
-            ("KDTree", select_spaced_points_fast_kdtree),
-            ("Hierarchical", select_spaced_points_hierarchical),
-            ("Grid-based", select_spaced_points_grid_based)
-        ]
-
-        for method_name, method_func in methods:
-            try:
-                start_time = time.time()
-                selected_coords, selected_indices = method_func(
-                    test_coords, n_select, "farthest", random_seed=42
-                )
-                end_time = time.time()
-
-                execution_time = end_time - start_time
-                print(f"  {method_name}: {execution_time:.3f}s, selected {len(selected_coords)} points")
-
-                if n not in results:
-                    results[n] = {}
-                results[n][method_name] = execution_time
-
-            except Exception as e:
-                print(f"  {method_name}: Failed - {e}")
-
-    return results
-
-
-# Updated function to replace in your code
-def select_spaced_points(frac_coords_list, n_points, mode,
-                                   target_value=0.5, random_seed=None):
-    """
-    Main optimized function to replace your original select_spaced_points
-    """
-    n_available = len(frac_coords_list)
-
-    # Choose algorithm based on dataset size
-    if n_available < 1000:
-        st.write("ORIGINAL")
-        # Use original algorithm for small datasets
-        return select_spaced_points_original(frac_coords_list, n_points, mode,
-                                             target_value, random_seed)
-    elif n_available < 10000:
-        # Use KDTree-based algorithm
-        st.write("KDTREE")
-        return select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
-                                                target_value, random_seed)
-    elif n_available < 50000:
-        st.write("HIERARCH")
-        # Use hierarchical algorithm
-        return select_spaced_points_hierarchical(frac_coords_list, n_points, mode,
-                                                 target_value, random_seed)
-    else:
-        # Use grid-based algorithm for very large datasets
-        st.write("GRIDBASE")
-        return select_spaced_points_grid_based(frac_coords_list, n_points, mode,
-                                               random_seed=random_seed)
 
 
 import numpy as np
@@ -1924,29 +1985,24 @@ def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_eleme
         positions = ase_atoms.get_positions()
         cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
 
-        # Strategy 1: Adaptive grid spacing based on structure size
         n_atoms = len(structure_obj)
         if n_atoms > 10000:
-            # Increase grid spacing for large structures
             adaptive_spacing = max(grid_spacing, grid_spacing * (n_atoms / 10000) ** 0.3)
             if log_area:
                 log_area.info(
                     f"Large structure detected ({n_atoms} atoms). Adjusting grid spacing from {grid_spacing:.2f} to {adaptive_spacing:.2f} Å")
             grid_spacing = adaptive_spacing
 
-        # Strategy 2: Limit maximum grid points
         max_grid_points = 50000  # Configurable limit
         n_points = [int(length / grid_spacing) + 1 for length in cell_lengths]
         total_grid_points = np.prod(n_points)
 
         if total_grid_points > max_grid_points:
-            # Scale down grid resolution
             scale_factor = (max_grid_points / total_grid_points) ** (1 / 3)
             n_points = [max(10, int(n * scale_factor)) for n in n_points]
             if log_area:
                 log_area.info(f"Grid too large ({total_grid_points} points). Scaled to {np.prod(n_points)} points")
 
-        # Strategy 3: Random sampling instead of full grid for very large cases
         if np.prod(n_points) > max_grid_points:
             return insert_interstitials_random_sampling(structure_obj, interstitial_element, n_interstitials,
                                                         min_distance, min_interstitial_distance, log_area, random_seed)
@@ -1955,11 +2011,10 @@ def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_eleme
             log_area.write(
                 f"Creating optimized grid: {n_points[0]}×{n_points[1]}×{n_points[2]} = {np.prod(n_points)} points")
 
-        # Generate grid points efficiently
         grid_points = generate_grid_points_efficient(n_points)
         grid_cart = np.dot(grid_points, cell.array)
 
-        # Strategy 4: Use KDTree for distance calculations
+
         tree = cKDTree(positions)
         min_distances_to_atoms = tree.query(grid_cart)[0]
 
@@ -1973,13 +2028,11 @@ def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_eleme
             if log_area: log_area.warning("No valid interstitial sites found")
             return new_structure
 
-        # Strategy 5: Optimized selection
         selected_points = select_interstitial_sites_optimized(
             valid_points, n_interstitials, mode, min_interstitial_distance,
             cell, log_area, random_seed
         )
 
-        # Insert selected points
         for point in selected_points:
             new_structure.append(
                 species=Element(interstitial_element),
@@ -1999,12 +2052,10 @@ def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_eleme
 
 
 def generate_grid_points_efficient(n_points):
-    """Generate grid points more efficiently using numpy"""
     x = np.linspace(0, 1, n_points[0], endpoint=False)
     y = np.linspace(0, 1, n_points[1], endpoint=False)
     z = np.linspace(0, 1, n_points[2], endpoint=False)
 
-    # Use meshgrid and reshape for efficiency
     X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
     grid_points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
     return grid_points
@@ -2012,7 +2063,6 @@ def generate_grid_points_efficient(n_points):
 
 def select_interstitial_sites_optimized(valid_points, n_interstitials, mode,
                                         min_interstitial_distance, cell, log_area, random_seed):
-    """Optimized selection of interstitial sites"""
     if random_seed is not None:
         np.random.seed(random_seed)
         random.seed(random_seed)
@@ -2024,23 +2074,19 @@ def select_interstitial_sites_optimized(valid_points, n_interstitials, mode,
         return select_random_with_distance_constraint(valid_points, n_to_insert,
                                                       min_interstitial_distance, cell, log_area)
     else:
-        # Use the optimized select_spaced_points for other modes
         valid_points_list = [valid_points[i] for i in range(len(valid_points))]
         selected_coords, _ = select_spaced_points_optimized(valid_points_list, n_to_insert, mode, 0.5, random_seed)
         return selected_coords
 
 
 def select_random_with_distance_constraint(valid_points, n_to_insert, min_distance, cell, log_area):
-    """Fast random selection with distance constraints"""
     selected_points = []
 
     if n_to_insert <= 0:
         return selected_points
 
-    # Convert to cartesian for distance calculations
     valid_cart = np.dot(valid_points, cell.array)
 
-    # Start with first random point
     first_idx = random.randint(0, len(valid_points) - 1)
     selected_points.append(valid_points[first_idx])
     selected_cart = [valid_cart[first_idx]]
@@ -2053,7 +2099,6 @@ def select_random_with_distance_constraint(valid_points, n_to_insert, min_distan
         candidate_idx = random.randint(0, len(valid_points) - 1)
         candidate_cart = valid_cart[candidate_idx]
 
-        # Check distance to all selected points
         if len(selected_cart) > 0:
             distances = cdist([candidate_cart], selected_cart)[0]
             min_dist = np.min(distances)
@@ -2073,7 +2118,6 @@ def select_random_with_distance_constraint(valid_points, n_to_insert, min_distan
 
 def insert_interstitials_random_sampling(structure_obj, interstitial_element, n_interstitials,
                                          min_distance, min_interstitial_distance, log_area, random_seed):
-    """Fallback method using random sampling for very large structures"""
     from pymatgen.io.ase import AseAtomsAdaptor
     from pymatgen.core import Element
 
@@ -2088,38 +2132,32 @@ def insert_interstitials_random_sampling(structure_obj, interstitial_element, n_
     cell = ase_atoms.get_cell()
     positions = ase_atoms.get_positions()
 
-    # Build KDTree for existing atoms
     tree = cKDTree(positions)
 
     selected_points = []
     selected_cart = []
     attempts = 0
-    max_attempts = n_interstitials * 1000  # Reasonable limit
+    max_attempts = n_interstitials * 1000
 
     while len(selected_points) < n_interstitials and attempts < max_attempts:
         attempts += 1
 
-        # Generate random fractional coordinate
         random_frac = np.random.rand(3)
         random_cart = np.dot(random_frac, cell.array)
 
-        # Check distance to existing atoms
+
         dist_to_atoms = tree.query(random_cart)[0]
         if dist_to_atoms < min_distance:
             continue
 
-        # Check distance to already selected interstitials
         if len(selected_cart) > 0:
             distances = cdist([random_cart], selected_cart)[0]
             min_dist_to_selected = np.min(distances)
             if min_dist_to_selected < min_interstitial_distance:
                 continue
-
-        # Point is valid
         selected_points.append(random_frac)
         selected_cart.append(random_cart)
 
-    # Insert selected points
     for point in selected_points:
         new_structure.append(
             species=Element(interstitial_element),
@@ -2138,7 +2176,6 @@ def insert_interstitials_random_sampling(structure_obj, interstitial_element, n_
 def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_interstitials,
                                        min_distance=2.0, initial_grid_spacing=0.5, mode="random",
                                        min_interstitial_distance=1.0, log_area=None, random_seed=None):
-    """Adaptive grid that adjusts based on available sites"""
     from pymatgen.io.ase import AseAtomsAdaptor
     from pymatgen.core import Element
 
@@ -2153,7 +2190,6 @@ def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_in
         positions = ase_atoms.get_positions()
         cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
 
-        # Start with coarse grid, refine if needed
         grid_spacings = [initial_grid_spacing * 2, initial_grid_spacing, initial_grid_spacing * 0.7]
 
         for grid_spacing in grid_spacings:
@@ -2165,12 +2201,9 @@ def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_in
 
             if total_points > 100000:  # Skip if too many points
                 continue
-
-            # Generate and test grid
             grid_points = generate_grid_points_efficient(n_points)
             grid_cart = np.dot(grid_points, cell.array)
 
-            # Fast distance check
             tree = cKDTree(positions)
             min_distances = tree.query(grid_cart)[0]
             valid_indices = np.where(min_distances >= min_distance)[0]
@@ -2179,15 +2212,14 @@ def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_in
             if log_area:
                 log_area.write(f"Found {n_valid} valid sites")
 
-            # If we have enough sites, use this grid
-            if n_valid >= n_interstitials * 2:  # 2x buffer
+            if n_valid >= n_interstitials * 2:
                 valid_points = grid_points[valid_indices]
                 selected_points = select_interstitial_sites_optimized(
                     valid_points, n_interstitials, mode, min_interstitial_distance,
                     cell, log_area, random_seed
                 )
 
-                # Insert points
+
                 for point in selected_points:
                     new_structure.append(
                         species=Element(interstitial_element),
@@ -2202,7 +2234,6 @@ def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_in
 
                 return new_structure
 
-        # If no grid worked, fall back to random sampling
         if log_area:
             log_area.warning("Grid method failed, falling back to random sampling")
 
@@ -2318,9 +2349,7 @@ def remove_vacancies_from_structure(structure_obj, vacancy_percentages_dict, sel
         np.random.seed(random_seed)
 
     if log_area: log_area.info(f"Attempting to create vacancies...")
-    st.info("HERE?")
     new_structure_vac = structure_obj.copy()
-    st.info("HERE NOT?")
     indices_to_remove_overall = []
     for el_symbol, perc_to_remove in vacancy_percentages_dict.items():
         if perc_to_remove <= 0: continue
@@ -3369,3 +3398,31 @@ def insert_database(ELEMENTS):
                                 )
                                 st.info(
                                     f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
+
+
+def get_laue_group(space_group_number):
+    laue_groups = {
+        # Triclinic
+        range(1, 3): "-1",
+        # Monoclinic
+        range(3, 16): "2/m",
+        # Orthorhombic
+        range(16, 75): "mmm",
+        # Tetragonal
+        range(75, 89): "4/m",
+        range(89, 143): "4/mmm",
+        # Trigonal
+        range(143, 149): "-3",
+        range(149, 168): "-3m",
+        # Hexagonal
+        range(168, 177): "6/m",
+        range(177, 195): "6/mmm",
+        # Cubic
+        range(195, 207): "m-3",
+        range(207, 231): "m-3m"
+    }
+
+    for sg_range, laue in laue_groups.items():
+        if space_group_number in sg_range:
+            return laue
+    return "Unknown"
