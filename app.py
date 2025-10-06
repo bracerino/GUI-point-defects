@@ -1792,6 +1792,8 @@ if st.session_state.uploaded_files:
                         int_target = st.number_input("Target (0=nearest, 1=farthest)", 0.0, 1.0, 0.5, 0.1,
                                                      format="%.1f",
                                                      key="int_target_voronoi")
+                    include_manual = st.checkbox("Include manual octahedral site detection", value=True,
+                                                 help="Adds systematic detection of octahedral sites at edge/face centers (useful for BCC structures)")
                 elif operation_mode == "Insert Interstitials (Fast Grid method)":
                     st.markdown("**Insert Interstitials Settings (Fast Grid - Quick for Large Structures)**")
                     int_c1, int_c2, int_c3 = st.columns(3)
@@ -2136,17 +2138,27 @@ if st.session_state.uploaded_files:
                 if operation_mode == "Insert Interstitials (Voronoi method)":
                     col_preview, col_apply = st.columns(2)
                     with col_preview:
-                        if st.button("Preview Interstitial Sites", key="preview_interstitials_btn", type = "tertiary"):
+                        if st.button("Preview Interstitial Sites", key="preview_interstitials_btn", type="tertiary"):
                             with col_defect_log:
-                                with st.expander("Preview Interstitial Sites", expanded = True):
+                                with st.expander("Preview Interstitial Sites", expanded=True):
                                     st.markdown("###### Interstitial Sites Preview")
                                     with st.spinner("Calculating available interstitials sites..."):
                                         try:
-                                            from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
+                                            from pymatgen.analysis.defects.generators import \
+                                                VoronoiInterstitialGenerator
 
                                             generator = VoronoiInterstitialGenerator(clustering_tol=int_clust,
                                                                                      min_dist=int_min_dist)
-                                            unique_interstitial_types = list(generator.generate(active_pmg_for_defects, "H"))
+                                            unique_interstitial_types = list(
+                                                generator.generate(active_pmg_for_defects, "H"))
+
+                                            if include_manual:
+                                                manual_sites = find_octahedral_sites(active_pmg_for_defects,
+                                                                                     min_distance=int_min_dist)
+                                                if manual_sites:
+                                                    manual_type = ManualInterstitialType(manual_sites,
+                                                                                         site_type="Octahedral (Manual)")
+                                                    unique_interstitial_types.append(manual_type)
 
                                             if not unique_interstitial_types:
                                                 st.warning("No interstitial sites found.")
@@ -2155,21 +2167,21 @@ if st.session_state.uploaded_files:
                                                     f"Found {len(unique_interstitial_types)} unique interstitial site types:")
 
                                                 total_sites = 0
-                                                for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
+                                                for i_type, interstitial_type_obj in enumerate(
+                                                        unique_interstitial_types):
                                                     site_coords = interstitial_type_obj.site.frac_coords
-                                                    site_classification = classify_interstitial_site(active_pmg_for_defects,
-                                                                                                     site_coords)
+                                                    site_classification = classify_interstitial_site(
+                                                        active_pmg_for_defects, site_coords)
                                                     equiv_sites_count = len(interstitial_type_obj.equivalent_sites)
                                                     total_sites += equiv_sites_count
 
-                                                    st.write(f"**Type {i_type + 1}:**")
+                                                    type_name = getattr(interstitial_type_obj, 'site_type', 'Voronoi')
+
+                                                    st.write(f"**Type {i_type + 1} ({type_name}):**")
                                                     st.write(f"  Position: {np.round(site_coords, 4)}")
                                                     st.write(f"  Classification: {site_classification}")
                                                     st.write(f"  Equivalent sites: {equiv_sites_count}")
                                                     st.write("---")
-
-                                                   
-
 
                                                 st.info(f"**Total available interstitial sites: {total_sites}**")
 
@@ -2178,25 +2190,30 @@ if st.session_state.uploaded_files:
                                                 elif 0 < int_type_idx <= len(unique_interstitial_types):
                                                     selected_type = unique_interstitial_types[int_type_idx - 1]
                                                     selected_count = len(selected_type.equivalent_sites)
-                                                    st.write(f"Selected: Type {int_type_idx} ({selected_count} sites)")
+                                                    type_name = getattr(selected_type, 'site_type', 'Voronoi')
+                                                    st.write(
+                                                        f"Selected: Type {int_type_idx} ({type_name}) - {selected_count} sites")
 
                                         except Exception as e:
                                             st.error(f"Error analyzing interstitial sites: {e}")
 
                     with col_apply:
-                        if not st.session_state.enable_batch_generation:
-                            if st.button("Apply Interstitials to Structure", key="apply_interstitials_btn", type="primary"):
-                                init_n = len(active_pmg_for_defects)
-                                mod_struct = insert_interstitials_into_structure(active_pmg_for_defects, int_el, int_n,
-                                                                                 int_type_idx,
-                                                                                 int_mode, int_clust, int_min_dist,
-                                                                                 int_target, col_defect_log)
-                                if len(mod_struct) > init_n:
-                                    st.session_state.current_structure = mod_struct
-                                    st.session_state.helpful = True
-                                    with col_defect_log:
-                                        st.success("Interstitials applied to structure.")
-                                    st.rerun()
+                        with col_apply:
+                            if not st.session_state.enable_batch_generation:
+                                if st.button("Apply Interstitials to Structure", key="apply_interstitials_btn",
+                                             type="primary"):
+                                    init_n = len(active_pmg_for_defects)
+                                    mod_struct = insert_interstitials_into_structure(
+                                        active_pmg_for_defects, int_el, int_n,
+                                        int_type_idx, int_mode, int_clust, int_min_dist,
+                                        int_target, col_defect_log, include_manual_sites=include_manual
+                                    )
+                                    if len(mod_struct) > init_n:
+                                        st.session_state.current_structure = mod_struct
+                                        st.session_state.helpful = True
+                                        with col_defect_log:
+                                            st.success("Interstitials applied to structure.")
+                                        st.rerun()
                                 else:
                                     with col_defect_log:
                                         st.warning("No interstitials were added to the structure.")
