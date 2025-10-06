@@ -1785,8 +1785,8 @@ if st.session_state.uploaded_files:
                     int_type_idx = int_c3.number_input("Site Type (0=all)", 0, key="int_type_idx")
                     int_c4, int_c5, int_c6 = st.columns(3)
                     int_mode = int_c4.selectbox("Mode", ["farthest", "nearest", "moderate"], 0, key="int_mode")
-                    int_clust = int_c5.number_input("Clust Tol.", 0.75, step=0.05, format="%.2f", key="int_clust")
-                    int_min_dist = int_c6.number_input("Min Dist.", 0.5, step=0.05, format="%.2f", key="int_min_dist")
+                    int_clust = int_c5.number_input("Clust Tol.", 0.10, step=0.05, format="%.2f", key="int_clust")
+                    int_min_dist = int_c6.number_input("Min Dist.", 0.10, step=0.05, format="%.2f", key="int_min_dist")
                     int_target = 0.5
                     if int_mode == "moderate":
                         int_target = st.number_input("Target (0=nearest, 1=farthest)", 0.0, 1.0, 0.5, 0.1,
