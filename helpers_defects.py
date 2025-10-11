@@ -81,6 +81,70 @@ from scipy.optimize import differential_evolution
 import warnings
 
 
+def apply_atomic_displacements(structure, displacement_mode="uniform", max_displacement=0.1,
+                               std_displacement=0.05, coordinate_system="cartesian",
+                               selected_elements=None, log_column=None, random_seed=None):
+    import numpy as np
+    import streamlit as st
+    from pymatgen.core import Structure, Element
+
+    # Convert random_seed to a plain Python int or None
+    if random_seed is not None:
+        try:
+            random_seed = int(random_seed)
+        except (TypeError, ValueError):
+            random_seed = None
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    displaced_structure = structure.copy()
+
+    atoms_to_displace = []
+    for i, site in enumerate(displaced_structure.sites):
+        if selected_elements is None or site.specie.symbol in selected_elements:
+            atoms_to_displace.append(i)
+
+    if log_column:
+        with log_column:
+            st.write(f"Displacing {len(atoms_to_displace)} of {len(displaced_structure)} atoms")
+            st.write(f"Mode: {displacement_mode}, Coordinate system: {coordinate_system}")
+
+    displaced_count = 0
+    for atom_idx in atoms_to_displace:
+        site = displaced_structure.sites[atom_idx]
+
+        if displacement_mode == "uniform":
+            direction = np.random.randn(3)
+            direction = direction / np.linalg.norm(direction)
+            magnitude = np.random.uniform(0, max_displacement)
+            displacement_vector = direction * magnitude
+        else:  # gaussian
+            displacement_vector = np.random.normal(0, std_displacement, 3)
+
+        if coordinate_system == "cartesian":
+            cart_coords = displaced_structure.lattice.get_cartesian_coords(site.frac_coords)
+            new_cart_coords = cart_coords + displacement_vector
+            new_frac_coords = displaced_structure.lattice.get_fractional_coords(new_cart_coords)
+        else:  # fractional
+            new_frac_coords = site.frac_coords + displacement_vector
+
+        new_frac_coords = new_frac_coords % 1.0
+
+        displaced_structure.replace(atom_idx, site.specie, new_frac_coords)
+        displaced_count += 1
+
+    if log_column:
+        with log_column:
+            st.success(f"Successfully displaced {displaced_count} atoms")
+            if displacement_mode == "uniform":
+                st.write(f"Maximum displacement: {max_displacement:.3f} Å")
+            else:
+                st.write(f"Std deviation: {std_displacement:.3f} Å")
+
+    return displaced_structure
+
 def find_octahedral_sites(structure, min_distance=1.5):
     from pymatgen.core import Element
 
