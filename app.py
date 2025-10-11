@@ -1640,13 +1640,13 @@ if st.session_state.uploaded_files:
                 defect_op_limit = 32
                 defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
-                              "Create Vacancies", "Substitute Atoms"]
+                              "Create Vacancies", "Substitute Atoms", "Apply Atomic Displacements"]
                 current_defect_op_options = defect_ops
                 if atom_count_defects > defect_op_limit:
                     st.warning(
                         f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}).")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
-                                                 "Substitute Atoms"]
+                                                 "Substitute Atoms","Apply Atomic Displacements"]
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
                 operation_mode = st.selectbox("Choose Defect Operation", current_defect_op_options, key=op_mode_key)
@@ -1967,7 +1967,94 @@ if st.session_state.uploaded_files:
                             st.info("No substitutions will be made with current settings.")
                     else:
                         st.warning("No elements for substitution.")
+                elif operation_mode == "Apply Atomic Displacements":
+                    st.markdown("**Apply Atomic Displacements Settings**")
+                    st.info(
+                        "💡 This will randomly displace each atom from its original position. Useful for simulating thermal disorder or creating perturbed structures.")
 
+                    disp_c1, disp_c2 = st.columns(2)
+
+                    with disp_c1:
+                        displacement_mode = st.selectbox(
+                            "Displacement Mode",
+                            ["uniform", "gaussian"],
+                            index=0,
+                            key="disp_mode",
+                            help="Uniform: equal probability in all directions within max distance\nGaussian: normal distribution centered at original position"
+                        )
+                        # Store in session state
+                        st.session_state.displacement_mode = displacement_mode
+
+                        if displacement_mode == "uniform":
+                            max_displacement = st.number_input(
+                                "Maximum displacement (Å)",
+                                min_value=0.01,
+                                max_value=2.0,
+                                value=0.1,
+                                step=0.01,
+                                format="%.3f",
+                                key="max_disp",
+                                help="Maximum distance each atom can be displaced"
+                            )
+                            st.session_state.max_displacement = max_displacement
+                        else:  # gaussian
+                            std_displacement = st.number_input(
+                                "Standard deviation (Å)",
+                                min_value=0.01,
+                                max_value=1.0,
+                                value=0.05,
+                                step=0.01,
+                                format="%.3f",
+                                key="std_disp",
+                                help="Standard deviation of Gaussian distribution for displacements"
+                            )
+                            st.session_state.std_displacement = std_displacement
+
+                    with disp_c2:
+                        apply_to_all = st.checkbox(
+                            "Apply to all atoms",
+                            value=True,
+                            key="disp_all",
+                            help="If unchecked, you can select specific elements to displace"
+                        )
+                        st.session_state.apply_to_all = apply_to_all
+
+                        coordinate_system = st.selectbox(
+                            "Coordinate System",
+                            ["cartesian", "fractional"],
+                            index=0,
+                            key="disp_coords",
+                            help="Cartesian: displacements in Å\nFractional: displacements relative to cell vectors"
+                        )
+                        st.session_state.coordinate_system = coordinate_system
+
+                    if not apply_to_all:
+                        disp_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+                        st.markdown("**Select elements to displace:**")
+
+                        selected_disp_elements = st.multiselect(
+                            "Elements",
+                            options=disp_els,
+                            default=disp_els,
+                            key="disp_elements",
+                            help="Select which elements should be displaced"
+                        )
+                        st.session_state.selected_disp_elements = selected_disp_elements
+                    else:
+                        st.session_state.selected_disp_elements = None
+
+                    # Preview
+                    st.markdown("**Displacement Preview:**")
+                    total_atoms = len(active_pmg_for_defects)
+                    if apply_to_all:
+                        st.info(f"Will displace all {total_atoms} atoms")
+                    elif not apply_to_all and st.session_state.get('selected_disp_elements'):
+                        n_to_displace = sum(1 for site in active_pmg_for_defects.sites
+                                            if site.specie.symbol in st.session_state.selected_disp_elements)
+                        elements_str = ', '.join(st.session_state.selected_disp_elements)
+                        st.info(f"Will displace {n_to_displace} of {total_atoms} atoms ({elements_str})")
+                    else:
+                        st.warning("No elements selected for displacement")
                # enable_batch = st.checkbox(
                #     "🎲 Enable Batch Generation (Generate multiple configurations with different random seeds)",
                #     value=st.session_state.enable_batch_generation,
@@ -2021,6 +2108,17 @@ if st.session_state.uploaded_files:
                                         elif operation_mode == "Substitute Atoms":
                                             modified_struct = substitute_atoms_in_structure(
                                                 base_struct, sub_settings, sub_mode, sub_target, None, seed
+                                            )
+                                        elif operation_mode == "Apply Atomic Displacements":
+                                            modified_struct = apply_atomic_displacements(
+                                                base_struct,
+                                                displacement_mode,
+                                                max_displacement if displacement_mode == "uniform" else None,
+                                                std_displacement if displacement_mode == "gaussian" else None,
+                                                coordinate_system,
+                                                selected_disp_elements if not apply_to_all else None,
+                                                None,  # log_area
+                                                seed
                                             )
                                         else:
                                             modified_struct = base_struct
@@ -2240,7 +2338,21 @@ if st.session_state.uploaded_files:
                         mod_struct = substitute_atoms_in_structure(mod_struct, sub_settings, sub_mode, sub_target,
                                                                    col_defect_log)
                         if mod_struct.composition != init_comp: changed = True
+                    elif operation_mode == "Apply Atomic Displacements":
+                        init_positions = np.array([site.frac_coords for site in mod_struct.sites])
+                        mod_struct = apply_atomic_displacements(
+                            mod_struct,
+                            displacement_mode,
+                            max_displacement if displacement_mode == "uniform" else None,
+                            std_displacement if displacement_mode == "gaussian" else None,
+                            coordinate_system,
+                            selected_disp_elements if not apply_to_all else None,
+                            col_defect_log
+                        )
 
+                        new_positions = np.array([site.frac_coords for site in mod_struct.sites])
+                        if not np.allclose(init_positions, new_positions, atol=1e-6):
+                            changed = True
                     st.session_state.current_structure = mod_struct
                     st.session_state.helpful = changed
                     with col_defect_log:
