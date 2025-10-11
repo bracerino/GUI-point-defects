@@ -1640,13 +1640,14 @@ if st.session_state.uploaded_files:
                 defect_op_limit = 32
                 defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
-                              "Create Vacancies", "Substitute Atoms", "Apply Atomic Displacements"]
+                              "Create Vacancies", "Substitute Atoms", "Apply Atomic Displacements",
+                              "Create Substitution Cluster"]
                 current_defect_op_options = defect_ops
                 if atom_count_defects > defect_op_limit:
                     st.warning(
                         f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}).")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
-                                                 "Substitute Atoms","Apply Atomic Displacements"]
+                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster"]
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
                 operation_mode = st.selectbox("Choose Defect Operation", current_defect_op_options, key=op_mode_key)
@@ -1794,6 +1795,74 @@ if st.session_state.uploaded_files:
                                                      key="int_target_voronoi")
                     include_manual = st.checkbox("Include manual octahedral site detection", value=True,
                                                  help="Adds systematic detection of octahedral sites at edge/face centers (useful for BCC structures)")
+                elif operation_mode == "Create Substitution Cluster":
+                    st.markdown("**Create Substitution Cluster Settings**")
+                    st.info(
+                        "This mode replaces a specified number of atoms of one element with another, ensuring the substituted atoms are physically close to form a cluster.")
+
+                    cluster_c1, cluster_c2, cluster_c3, cluster_c4 = st.columns(4)
+
+                    available_elements = sorted(
+                        list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+
+                    with cluster_c1:
+                        orig_element = st.selectbox(
+                            "Original Element",
+                            options=available_elements,
+                            key="cluster_orig_el",
+                            help="The element to be replaced."
+                        )
+
+                    with cluster_c2:
+                        sub_element = st.selectbox(
+                            "Substitute Element",
+                            options=ELEMENTS,
+                            key="cluster_sub_el",
+                            help="The new element to introduce."
+                        )
+
+                    with cluster_c3:
+                        if orig_element:
+                            max_atoms_for_cluster = sum(
+                                1 for s in active_pmg_for_defects.sites if s.specie.symbol == orig_element)
+                        else:
+                            max_atoms_for_cluster = 1
+
+                        num_to_substitute = st.number_input(
+                            "# Atoms in Cluster",
+                            min_value=1,
+                            max_value=max_atoms_for_cluster,
+                            value=max(1, min(5, max_atoms_for_cluster)),
+                            step=1,
+                            key="cluster_num_atoms",
+                            help=f"Number of '{orig_element}' atoms to replace. Max: {max_atoms_for_cluster}"
+                        )
+
+                    with cluster_c4:
+                        cluster_radius_input = st.number_input(
+                            "Cluster Radius (Å)",
+                            min_value=0.1,
+                            max_value=15.0,
+                            value=3.5,
+                            step=0.1,
+                            format="%.1f",
+                            key="cluster_radius_input",
+                            help="Max distance to search for neighbors to expand the cluster."
+                        )
+
+                    delete_others = st.checkbox(
+                        "🗑️ Delete other original elements (outside cluster)",
+                        value=False,
+                        key="delete_other_orig_el_cluster",
+                        help=f"If checked, all '{orig_element}' atoms not part of the created cluster will be removed from the structure."
+                    )
+
+                    st.markdown("**Preview of Cluster to be Created:**")
+                    st.write(
+                        f"• Will replace **{num_to_substitute}** atoms of **{orig_element}** with **{sub_element}** within a radius of **{cluster_radius_input} Å**.")
+                    if delete_others:
+                        st.info(f"• All other non-clustered **{orig_element}** atoms will be deleted.")
+
                 elif operation_mode == "Insert Interstitials (Fast Grid method)":
                     st.markdown("**Insert Interstitials Settings (Fast Grid - Quick for Large Structures)**")
                     int_c1, int_c2, int_c3 = st.columns(3)
@@ -2118,10 +2187,32 @@ if st.session_state.uploaded_files:
                                                 coordinate_system,
                                                 selected_disp_elements if not apply_to_all else None,
                                                 None,  # log_area
-                                                seed
-                                            )
-                                        else:
-                                            modified_struct = base_struct
+                                                seed)
+
+                                        elif operation_mode == "Create Substitution Cluster":
+                                            orig_el = st.session_state.get('cluster_orig_el')
+                                            sub_el = st.session_state.get('cluster_sub_el')
+                                            num_sub = st.session_state.get('cluster_num_atoms')
+                                            radius = st.session_state.get('cluster_radius_input')
+                                            del_others = st.session_state.get('delete_other_orig_el_cluster', False)
+
+
+                                            if all([orig_el, sub_el, num_sub, radius is not None]):
+                                                modified_struct = create_substitution_cluster(
+                                                    base_struct,
+                                                    orig_el,
+                                                    sub_el,
+                                                    num_sub,
+                                                    radius,
+                                                    None,
+                                                    seed,
+                                                    delete_non_clustered_original_elements=del_others
+                                                )
+                                            else:
+                                                st.warning(
+                                                    f"Skipping config {i + 1}: Cluster parameters not found in session state.")
+                                                modified_struct = base_struct
+
 
                                         st.session_state.generated_structures[config_name] = modified_struct
 
@@ -2352,6 +2443,20 @@ if st.session_state.uploaded_files:
 
                         new_positions = np.array([site.frac_coords for site in mod_struct.sites])
                         if not np.allclose(init_positions, new_positions, atol=1e-6):
+                            changed = True
+                    elif operation_mode == "Create Substitution Cluster":  # <-- Modified this section
+                        init_comp = mod_struct.composition
+                        init_n = len(mod_struct)
+                        mod_struct = create_substitution_cluster(
+                            mod_struct,
+                            orig_element,
+                            sub_element,
+                            num_to_substitute,
+                            cluster_radius_input,
+                            col_defect_log,
+                            delete_non_clustered_original_elements=delete_others  # <-- Pass the new parameter
+                        )
+                        if mod_struct.composition != init_comp or len(mod_struct) != init_n:
                             changed = True
                     st.session_state.current_structure = mod_struct
                     st.session_state.helpful = changed
