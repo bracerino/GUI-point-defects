@@ -10,6 +10,7 @@ from ase.io import read, write
 from matminer.featurizers.structure import PartialRadialDistributionFunction
 import numpy as np
 from ase.io import write
+from scipy.spatial import cKDTree
 from pymatgen.io.ase import AseAtomsAdaptor
 import streamlit.components.v1 as components
 import py3Dmol
@@ -55,6 +56,7 @@ from PIL import Image
 from pymatgen.io.cif import CifWriter
 
 
+
 MP_API_KEY = "UtfGa1BUI3RlWYVwfpMco2jVt8ApHOye"
 ELEMENTS = [
     'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
@@ -79,6 +81,189 @@ import random
 import time
 from scipy.optimize import differential_evolution
 import warnings
+
+
+def select_cluster_points(structure_obj, target_element_symbol, n_points, cluster_radius, random_seed=None,
+                          log_area=None):
+
+    if random_seed is not None:
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    if log_area:
+        log_area.info(
+            f"Selecting {n_points} '{target_element_symbol}' atoms for clustering with radius {cluster_radius} Å.")
+
+    element_sites_indices = [i for i, site in enumerate(structure_obj.sites) if
+                             site.specie.symbol == target_element_symbol]
+
+    if not element_sites_indices or n_points == 0:
+        if log_area: log_area.warning(f"No '{target_element_symbol}' atoms found or zero points requested.")
+        return [], []
+
+    if n_points > len(element_sites_indices):
+        if log_area: log_area.warning(
+            f"Requested {n_points} points but only {len(element_sites_indices)} are available. Selecting all.")
+        n_points = len(element_sites_indices)
+        return [structure_obj.sites[i].frac_coords for i in element_sites_indices], element_sites_indices
+
+    # 1. Get all atom positions in Cartesian coordinates
+    all_cart_coords = np.array([site.coords for site in structure_obj.sites])
+
+    # 2. To handle periodicity, create a temporary 3x3x3 supercell of coordinates
+    periodic_coords = []
+    periodic_indices = []
+    for i in [-1, 0, 1]:
+        for j in [-1, 0, 1]:
+            for k in [-1, 0, 1]:
+                offset = np.dot([i, j, k], structure_obj.lattice.matrix)
+                periodic_coords.append(all_cart_coords + offset)
+                periodic_indices.extend(range(len(structure_obj)))
+
+    periodic_coords = np.vstack(periodic_coords)
+
+    # 3. Build the KDTree on the periodic Cartesian coordinates
+    tree = cKDTree(periodic_coords)
+
+    # Choose a random starting atom of the correct element type (global index)
+    seed_global_idx = random.choice(element_sites_indices)
+
+    selected_indices = {seed_global_idx}  # Use a set for efficient additions and lookups
+
+    if log_area:
+        log_area.write(
+            f"  Starting cluster with seed atom #{seed_global_idx} ({structure_obj.sites[seed_global_idx].specie.symbol}).")
+
+    while len(selected_indices) < n_points:
+        frontier_indices_for_query = list(selected_indices)
+
+        all_neighbors_found = set()
+
+        # Find all neighbors for all atoms currently in the cluster
+        for frontier_idx in frontier_indices_for_query:
+            frontier_cart_coord = structure_obj.sites[frontier_idx].coords
+
+
+            neighbor_periodic_indices = tree.query_ball_point(frontier_cart_coord, r=cluster_radius)
+
+            # Map periodic indices back to original indices (0 to N-1)
+            original_neighbor_indices = {periodic_indices[i] for i in neighbor_periodic_indices}
+            all_neighbors_found.update(original_neighbor_indices)
+
+
+        valid_candidates = [
+            idx for idx in all_neighbors_found
+            if idx in element_sites_indices and idx not in selected_indices
+        ]
+
+        if not valid_candidates:
+            if log_area: log_area.warning(
+                f"  Could not expand cluster further. Only {len(selected_indices)} atoms of the required {n_points} were found within the radius.")
+            break
+
+        min_dist_to_cluster = float('inf')
+        next_best_idx = -1
+
+        # Get Cartesian coordinates of already selected atoms
+        selected_cart_coords = np.array([structure_obj.sites[idx].coords for idx in selected_indices])
+
+        for candidate_global_idx in valid_candidates:
+            candidate_cart_coord = structure_obj.sites[candidate_global_idx].coords
+
+
+            temp_delta_cart = selected_cart_coords - candidate_cart_coord
+            min_dist_val = float('inf')
+            for d_cart in temp_delta_cart:
+                # Need to convert Cartesian delta to fractional, apply PBC, then convert back
+                d_frac = structure_obj.lattice.get_fractional_coords(d_cart)
+                d_frac -= np.round(d_frac) # Apply PBC
+                d_cart_pbc = structure_obj.lattice.get_cartesian_coords(d_frac)
+                min_dist_val = min(min_dist_val, np.linalg.norm(d_cart_pbc))
+
+            if min_dist_val < min_dist_to_cluster:
+                min_dist_to_cluster = min_dist_val
+                next_best_idx = candidate_global_idx
+
+        if next_best_idx != -1:
+            selected_indices.add(next_best_idx)
+            if log_area:
+                log_area.write(f"  Added atom #{next_best_idx} to cluster. Total: {len(selected_indices)}/{n_points}")
+        else:
+            break # No more valid candidates to add
+
+    final_selected_indices = list(selected_indices)
+    final_selected_frac_coords = [structure_obj.sites[i].frac_coords for i in final_selected_indices]
+
+    if log_area: log_area.success(f"Finished selecting {len(final_selected_indices)} atoms for clustering.")
+
+    return final_selected_frac_coords, final_selected_indices
+
+def create_substitution_cluster(structure_obj, orig_el_symbol, sub_el_symbol, n_to_substitute,
+                                cluster_radius, log_area=None, random_seed=None,
+                                delete_non_clustered_original_elements: bool = False): # <-- Added new parameter
+
+    if log_area:
+        log_area.info(
+            f"Attempting to create a cluster of {n_to_substitute} '{sub_el_symbol}' atoms replacing '{orig_el_symbol}'.")
+        if delete_non_clustered_original_elements:
+            log_area.info(f"Enabled: All other '{orig_el_symbol}' atoms will be deleted.")
+
+    if not sub_el_symbol:
+        if log_area: log_area.error("Substitute element cannot be empty.")
+        return structure_obj.copy()
+
+    try:
+        sub_element = Element(sub_el_symbol)
+    except Exception:
+        if log_area: log_area.error(f"Invalid substitute element: '{sub_el_symbol}'.")
+        return structure_obj.copy()
+
+    # Use the cluster selection logic to find the indices
+    _, selected_global_indices = select_cluster_points(
+        structure_obj, orig_el_symbol, n_to_substitute, cluster_radius, random_seed, log_area
+    )
+
+    if not selected_global_indices:
+        if log_area: log_area.warning("No atoms were selected for clustering. Returning original structure.")
+        return structure_obj.copy()
+
+    # Create lists to build the new structure
+    final_species = []
+    final_frac_coords = []
+    original_site_indices_to_keep = set()
+
+    for i, site in enumerate(structure_obj.sites):
+        if i in selected_global_indices:
+            final_species.append(sub_element)
+            final_frac_coords.append(site.frac_coords)
+            original_site_indices_to_keep.add(i)
+        elif delete_non_clustered_original_elements and site.specie.symbol == orig_el_symbol:
+            if log_area: log_area.write(f"  Skipping (deleting) non-clustered {orig_el_symbol} at index {i}.")
+            continue
+        else:
+            # Keep all other atoms as they are
+            final_species.append(site.species)
+            final_frac_coords.append(site.frac_coords)
+            original_site_indices_to_keep.add(i)
+
+    final_clustered_structure = Structure(
+        lattice=structure_obj.lattice,
+        species=final_species,
+        coords=final_frac_coords,
+        coords_are_cartesian=False
+    )
+
+    if log_area:
+        if delete_non_clustered_original_elements:
+            log_area.success(
+                f"Successfully created a cluster of {len(selected_global_indices)} '{sub_el_symbol}' atoms "
+                f"and deleted {len(structure_obj.sites) - len(final_clustered_structure)} non-clustered '{orig_el_symbol}' atoms. "
+                f"Total atoms: {len(structure_obj.sites)} -> {len(final_clustered_structure)}.")
+        else:
+            log_area.success(
+                f"Successfully created a cluster of {len(selected_global_indices)} '{sub_el_symbol}' atoms.")
+
+    return final_clustered_structure
 
 
 def apply_atomic_displacements(structure, displacement_mode="uniform", max_displacement=0.1,
