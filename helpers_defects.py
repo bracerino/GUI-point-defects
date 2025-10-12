@@ -83,6 +83,98 @@ from scipy.optimize import differential_evolution
 import warnings
 
 
+def swap_nearest_elements(structure_obj, el1_symbol, el2_symbol, n_swaps, max_distance, log_area=None,
+                          random_seed=None):
+    """
+    Swaps a specified number of nearest pairs between two elements.
+
+    Args:
+        structure_obj (pymatgen.core.Structure): The input crystal structure.
+        el1_symbol (str): Symbol of the first element (e.g., the interstitial).
+        el2_symbol (str): Symbol of the second element (e.g., the host atom).
+        n_swaps (int): The number of element pairs to swap.
+        max_distance (float): Maximum distance (in Angstroms) to consider for "nearest" pairs.
+        log_area (streamlit.delta_generator.DeltaGenerator, optional): Streamlit area for logging.
+        random_seed (int, optional): Seed for random operations.
+
+    Returns:
+        pymatgen.core.Structure: The modified structure with elements swapped.
+    """
+    if log_area:
+        log_area.info(
+            f"Attempting to swap {n_swaps} nearest '{el1_symbol}' with '{el2_symbol}' within {max_distance:.2f} Å.")
+
+    if random_seed is not None:
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    new_structure = structure_obj.copy()
+
+    el1_indices = [i for i, site in enumerate(new_structure.sites) if site.specie.symbol == el1_symbol]
+    el2_indices = [i for i, site in enumerate(new_structure.sites) if site.specie.symbol == el2_symbol]
+
+    if not el1_indices or not el2_indices:
+        if log_area:
+            log_area.warning(
+                f"Could not find both '{el1_symbol}' and '{el2_symbol}' in the structure. No swaps performed.")
+        return new_structure
+
+    # Get Cartesian coordinates for both element types
+    el1_coords_cart = np.array([new_structure.sites[i].coords for i in el1_indices])
+    el2_coords_cart = np.array([new_structure.sites[i].coords for i in el2_indices])
+
+    # Build k-d tree for faster nearest-neighbor search of el2 atoms
+    tree_el2 = cKDTree(el2_coords_cart)
+
+    potential_swaps = []  # List of (distance, el1_global_idx, el2_global_idx)
+
+    # Find nearest el2 for each el1 within max_distance
+    for i, el1_cart_coord in enumerate(el1_coords_cart):
+        dist, idx = tree_el2.query(el1_cart_coord, k=1, distance_upper_bound=max_distance)
+
+        # Check if a neighbor within max_distance was found
+        if dist < float('inf') and dist <= max_distance:
+            el1_global_idx = el1_indices[i]
+            el2_global_idx = el2_indices[idx]
+            potential_swaps.append((dist, el1_global_idx, el2_global_idx))
+
+    if not potential_swaps:
+        if log_area:
+            log_area.warning(f"No '{el1_symbol}' and '{el2_symbol}' pairs found within {max_distance:.2f} Å to swap.")
+        return new_structure
+
+    # Sort by distance (nearest first) and take unique pairs
+    potential_swaps.sort(key=lambda x: x[0])
+
+    performed_swaps_count = 0
+    used_el1_indices = set()
+    used_el2_indices = set()
+
+    # Iterate through potential swaps to select non-overlapping pairs
+    for _, el1_global_idx, el2_global_idx in potential_swaps:
+        if performed_swaps_count >= n_swaps:
+            break
+
+        if el1_global_idx not in used_el1_indices and el2_global_idx not in used_el2_indices:
+            # Perform the swap on the new_structure
+            el1_site = new_structure.sites[el1_global_idx]
+            el2_site = new_structure.sites[el2_global_idx]
+
+            new_structure.replace(el1_global_idx, el2_site.specie, el1_site.frac_coords)
+            new_structure.replace(el2_global_idx, el1_site.specie, el2_site.frac_coords)
+
+            used_el1_indices.add(el1_global_idx)
+            used_el2_indices.add(el2_global_idx)
+            performed_swaps_count += 1
+            if log_area:
+                log_area.write(
+                    f"  Swapped atom {el1_global_idx} ({el1_symbol}) with atom {el2_global_idx} ({el2_symbol}).")
+
+    if log_area:
+        log_area.success(f"Successfully performed {performed_swaps_count} element swaps.")
+
+    return new_structure
+
 def select_cluster_points(structure_obj, target_element_symbol, n_points, cluster_radius, random_seed=None,
                           log_area=None):
 
@@ -107,10 +199,8 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
         n_points = len(element_sites_indices)
         return [structure_obj.sites[i].frac_coords for i in element_sites_indices], element_sites_indices
 
-    # 1. Get all atom positions in Cartesian coordinates
     all_cart_coords = np.array([site.coords for site in structure_obj.sites])
 
-    # 2. To handle periodicity, create a temporary 3x3x3 supercell of coordinates
     periodic_coords = []
     periodic_indices = []
     for i in [-1, 0, 1]:
@@ -122,13 +212,10 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
 
     periodic_coords = np.vstack(periodic_coords)
 
-    # 3. Build the KDTree on the periodic Cartesian coordinates
     tree = cKDTree(periodic_coords)
-
-    # Choose a random starting atom of the correct element type (global index)
     seed_global_idx = random.choice(element_sites_indices)
 
-    selected_indices = {seed_global_idx}  # Use a set for efficient additions and lookups
+    selected_indices = {seed_global_idx}
 
     if log_area:
         log_area.write(
@@ -139,14 +226,12 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
 
         all_neighbors_found = set()
 
-        # Find all neighbors for all atoms currently in the cluster
         for frontier_idx in frontier_indices_for_query:
             frontier_cart_coord = structure_obj.sites[frontier_idx].coords
 
 
             neighbor_periodic_indices = tree.query_ball_point(frontier_cart_coord, r=cluster_radius)
 
-            # Map periodic indices back to original indices (0 to N-1)
             original_neighbor_indices = {periodic_indices[i] for i in neighbor_periodic_indices}
             all_neighbors_found.update(original_neighbor_indices)
 
@@ -164,7 +249,6 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
         min_dist_to_cluster = float('inf')
         next_best_idx = -1
 
-        # Get Cartesian coordinates of already selected atoms
         selected_cart_coords = np.array([structure_obj.sites[idx].coords for idx in selected_indices])
 
         for candidate_global_idx in valid_candidates:
@@ -174,9 +258,8 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
             temp_delta_cart = selected_cart_coords - candidate_cart_coord
             min_dist_val = float('inf')
             for d_cart in temp_delta_cart:
-                # Need to convert Cartesian delta to fractional, apply PBC, then convert back
                 d_frac = structure_obj.lattice.get_fractional_coords(d_cart)
-                d_frac -= np.round(d_frac) # Apply PBC
+                d_frac -= np.round(d_frac)
                 d_cart_pbc = structure_obj.lattice.get_cartesian_coords(d_frac)
                 min_dist_val = min(min_dist_val, np.linalg.norm(d_cart_pbc))
 
@@ -189,7 +272,7 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
             if log_area:
                 log_area.write(f"  Added atom #{next_best_idx} to cluster. Total: {len(selected_indices)}/{n_points}")
         else:
-            break # No more valid candidates to add
+            break
 
     final_selected_indices = list(selected_indices)
     final_selected_frac_coords = [structure_obj.sites[i].frac_coords for i in final_selected_indices]
@@ -200,7 +283,7 @@ def select_cluster_points(structure_obj, target_element_symbol, n_points, cluste
 
 def create_substitution_cluster(structure_obj, orig_el_symbol, sub_el_symbol, n_to_substitute,
                                 cluster_radius, log_area=None, random_seed=None,
-                                delete_non_clustered_original_elements: bool = False): # <-- Added new parameter
+                                delete_non_clustered_original_elements: bool = False): #
 
     if log_area:
         log_area.info(
