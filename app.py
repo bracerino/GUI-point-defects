@@ -1876,13 +1876,13 @@ if st.session_state.uploaded_files:
                     int_mode_fast = int_c3.selectbox("Mode", ["random"], 0,
                                                      key="int_mode_fast")
                     int_c4, int_c5, int_c6 = st.columns(3)
-                    int_min_dist_fast = int_c4.number_input("Min Distance from atoms (Å)", 1.5, step=0.1, format="%.1f",
+                    int_min_dist_fast = int_c4.number_input("Min Distance from atoms (Å)", 0.2, value = 1.0, step=0.1, format="%.1f",
                                                             key="int_min_dist_fast",
                                                             help="Minimum distance from existing atoms")
-                    int_grid_spacing = int_c5.number_input("Grid Spacing (Å)", 0.5, step=0.1, format="%.1f",
+                    int_grid_spacing = int_c5.number_input("Grid Spacing (Å)", 0.01, value = 0.5, step=0.01, format="%.2f",
                                                            key="int_grid_spacing",
                                                            help="Smaller = more precise but slower")
-                    int_min_int_dist = int_c6.number_input("Min Interstitial-Interstitial Distance (Å)", 1.0, step=0.1,
+                    int_min_int_dist = int_c6.number_input("Min Interstitial-Interstitial Distance (Å)", 0.2, value = 1.0 step=0.1,
                                                            format="%.1f",
                                                            key="int_min_int_dist",
                                                            help="Minimum distance between interstitials")
