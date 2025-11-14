@@ -1882,7 +1882,7 @@ if st.session_state.uploaded_files:
                     int_grid_spacing = int_c5.number_input("Grid Spacing (Å)", 0.01, value = 0.5, step=0.01, format="%.2f",
                                                            key="int_grid_spacing",
                                                            help="Smaller = more precise but slower")
-                    int_min_int_dist = int_c6.number_input("Min Interstitial-Interstitial Distance (Å)", 0.2, value = 1.0 step=0.1,
+                    int_min_int_dist = int_c6.number_input("Min Interstitial-Interstitial Distance (Å)", 0.2, value = 1.0, step=0.1,
                                                            format="%.1f",
                                                            key="int_min_int_dist",
                                                            help="Minimum distance between interstitials")
