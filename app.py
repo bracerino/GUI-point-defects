@@ -34,6 +34,8 @@ import io
 from pymatgen.core import Structure, Element
 from PIL import Image
 from pymatgen.transformations.standard_transformations import SupercellTransformation
+from create_selective_dynamics import render_selective_dynamics_ui
+
 
 MP_API_KEY = "UtfGa1BUI3RlWYVwfpMco2jVt8ApHOye"
 ELEMENTS = [
@@ -185,6 +187,20 @@ show_database_search = st.checkbox("Enable **database** search (MP, AFLOW, COD)"
                                    value=False,
                                    help="Enable to search in Materials Project, AFLOW, and COD databases")
 
+enable_selective_dynamics = st.checkbox(
+    "🔒 Enable Selective Dynamics Tool",
+    value=False,
+    help="Enable tool to fix atomic positions in POSCAR files"
+)
+
+if enable_selective_dynamics:
+    if 'full_structures' in st.session_state and st.session_state.full_structures:
+        render_selective_dynamics_ui(
+            structures_dict=st.session_state.full_structures,
+            selected_file=st.session_state.get('selected_file')
+        )
+    else:
+        st.warning("Upload structure files first to use the Selective Dynamics tool")
 
 def get_space_group_info(number):
     symbol = SPACE_GROUP_SYMBOLS.get(number, f"SG#{number}")
