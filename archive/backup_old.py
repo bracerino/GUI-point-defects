@@ -1097,7 +1097,12 @@ default_session_states = {
     'applied_supercell_n_a': 1, 'applied_supercell_n_b': 1, 'applied_supercell_n_c': 1,
     'applied_cell_type_name': "Conventional_Cell", 'helpful': False, 'preview_structure': None,
     'show_3d_visualization': True, 'show_atomic_labels': False, 'generated_structures': {},
-    'enable_batch_generation': False
+    'enable_batch_generation': False,
+    'swap_int_el': None,
+    'swap_target_el': None,
+    'swap_num_swaps': 1,
+    'swap_max_dist': 3.0
+
 }
 for key, value in default_session_states.items():
     if key not in st.session_state:
@@ -1640,13 +1645,14 @@ if st.session_state.uploaded_files:
                 defect_op_limit = 32
                 defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
-                              "Create Vacancies", "Substitute Atoms"]
+                              "Create Vacancies", "Substitute Atoms", "Apply Atomic Displacements",
+                              "Create Substitution Cluster", "Swap Nearest Elements"]
                 current_defect_op_options = defect_ops
                 if atom_count_defects > defect_op_limit:
                     st.warning(
                         f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}).")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
-                                                 "Substitute Atoms"]
+                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster", "Swap Nearest Elements"]
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
                 operation_mode = st.selectbox("Choose Defect Operation", current_defect_op_options, key=op_mode_key)
@@ -1792,6 +1798,76 @@ if st.session_state.uploaded_files:
                         int_target = st.number_input("Target (0=nearest, 1=farthest)", 0.0, 1.0, 0.5, 0.1,
                                                      format="%.1f",
                                                      key="int_target_voronoi")
+                    include_manual = st.checkbox("Include manual octahedral site detection", value=True,
+                                                 help="Adds systematic detection of octahedral sites at edge/face centers (useful for BCC structures)")
+                elif operation_mode == "Create Substitution Cluster":
+                    st.markdown("**Create Substitution Cluster Settings**")
+                    st.info(
+                        "This mode replaces a specified number of atoms of one element with another, ensuring the substituted atoms are physically close to form a cluster.")
+
+                    cluster_c1, cluster_c2, cluster_c3, cluster_c4 = st.columns(4)
+
+                    available_elements = sorted(
+                        list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+
+                    with cluster_c1:
+                        orig_element = st.selectbox(
+                            "Original Element",
+                            options=available_elements,
+                            key="cluster_orig_el",
+                            help="The element to be replaced."
+                        )
+
+                    with cluster_c2:
+                        sub_element = st.selectbox(
+                            "Substitute Element",
+                            options=ELEMENTS,
+                            key="cluster_sub_el",
+                            help="The new element to introduce."
+                        )
+
+                    with cluster_c3:
+                        if orig_element:
+                            max_atoms_for_cluster = sum(
+                                1 for s in active_pmg_for_defects.sites if s.specie.symbol == orig_element)
+                        else:
+                            max_atoms_for_cluster = 1
+
+                        num_to_substitute = st.number_input(
+                            "# Atoms in Cluster",
+                            min_value=1,
+                            max_value=max_atoms_for_cluster,
+                            value=max(1, min(5, max_atoms_for_cluster)),
+                            step=1,
+                            key="cluster_num_atoms",
+                            help=f"Number of '{orig_element}' atoms to replace. Max: {max_atoms_for_cluster}"
+                        )
+
+                    with cluster_c4:
+                        cluster_radius_input = st.number_input(
+                            "Cluster Radius (Å)",
+                            min_value=0.1,
+                            max_value=15.0,
+                            value=3.5,
+                            step=0.1,
+                            format="%.1f",
+                            key="cluster_radius_input",
+                            help="Max distance to search for neighbors to expand the cluster."
+                        )
+
+                    delete_others = st.checkbox(
+                        "🗑️ Delete other original elements (outside cluster)",
+                        value=False,
+                        key="delete_other_orig_el_cluster",
+                        help=f"If checked, all '{orig_element}' atoms not part of the created cluster will be removed from the structure."
+                    )
+
+                    st.markdown("**Preview of Cluster to be Created:**")
+                    st.write(
+                        f"• Will replace **{num_to_substitute}** atoms of **{orig_element}** with **{sub_element}** within a radius of **{cluster_radius_input} Å**.")
+                    if delete_others:
+                        st.info(f"• All other non-clustered **{orig_element}** atoms will be deleted.")
+
                 elif operation_mode == "Insert Interstitials (Fast Grid method)":
                     st.markdown("**Insert Interstitials Settings (Fast Grid - Quick for Large Structures)**")
                     int_c1, int_c2, int_c3 = st.columns(3)
@@ -1800,13 +1876,13 @@ if st.session_state.uploaded_files:
                     int_mode_fast = int_c3.selectbox("Mode", ["random"], 0,
                                                      key="int_mode_fast")
                     int_c4, int_c5, int_c6 = st.columns(3)
-                    int_min_dist_fast = int_c4.number_input("Min Distance from atoms (Å)", 1.5, step=0.1, format="%.1f",
+                    int_min_dist_fast = int_c4.number_input("Min Distance from atoms (Å)", 0.2, value = 1.0, step=0.1, format="%.1f",
                                                             key="int_min_dist_fast",
                                                             help="Minimum distance from existing atoms")
-                    int_grid_spacing = int_c5.number_input("Grid Spacing (Å)", 0.5, step=0.1, format="%.1f",
+                    int_grid_spacing = int_c5.number_input("Grid Spacing (Å)", 0.01, value = 0.5, step=0.01, format="%.2f",
                                                            key="int_grid_spacing",
                                                            help="Smaller = more precise but slower")
-                    int_min_int_dist = int_c6.number_input("Min Interstitial-Interstitial Distance (Å)", 1.0, step=0.1,
+                    int_min_int_dist = int_c6.number_input("Min Interstitial-Interstitial Distance (Å)", 0.2, value = 1.0, step=0.1,
                                                            format="%.1f",
                                                            key="int_min_int_dist",
                                                            help="Minimum distance between interstitials")
@@ -1887,6 +1963,70 @@ if st.session_state.uploaded_files:
                             st.info("No vacancies will be created with current settings.")
                     else:
                         st.warning("No elements for vacancies.")
+                elif operation_mode == "Swap Nearest Elements":  # NEW BLOCK STARTS HERE
+                    st.markdown("**Swap Nearest Elements Settings**")
+                    st.info(
+                        "This operation identifies atoms of the 'Interstitial Element' and their nearest neighbors of the 'Target Element', then swaps their identities. Useful for studying antisite defects or interstitial migration."
+                    )
+
+                    swap_c1, swap_c2 = st.columns(2)
+                    available_elements_in_structure = sorted(
+                        list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie))
+                    )
+
+                    with swap_c1:
+                        interstitial_el_swap = st.selectbox(
+                            "Interstitial Element (Element to move)",
+                            options=available_elements_in_structure,
+                            key="swap_int_el",
+                            help="The element whose position is considered an 'interstitial' site (e.g., Al in Ti host)."
+                        )
+
+                    with swap_c2:
+                        target_el_swap = st.selectbox(
+                            "Target Element to Swap (Host atom to replace)",
+                            options=[el for el in available_elements_in_structure if el != interstitial_el_swap],
+                            key="swap_target_el",
+                            help="The element in the host lattice that will swap with the interstitial (e.g., Ti in Al interstitial)."
+                        )
+                        # Ensure default is not the same if possible
+                        if interstitial_el_swap and target_el_swap == interstitial_el_swap:
+                            st.warning(
+                                "Interstitial and Target elements cannot be the same. Please select different elements.")
+                            target_el_swap = ""  # Reset to force selection
+
+                    swap_c3, swap_c4 = st.columns(2)
+                    with swap_c3:
+                        num_swaps = st.number_input(
+                            "# Number of Swaps",
+                            min_value=1,
+                            max_value=min(
+                                sum(1 for s in active_pmg_for_defects.sites if s.specie.symbol == interstitial_el_swap),
+                                sum(1 for s in active_pmg_for_defects.sites if s.specie.symbol == target_el_swap)
+                            ) if interstitial_el_swap and target_el_swap else 1,
+                            value=1,
+                            step=1,
+                            key="swap_num_swaps",
+                            help="How many pairs of (interstitial element) <-> (target element) to swap. Limited by the count of the scarcer element."
+                        )
+                    with swap_c4:
+                        max_swap_distance = st.number_input(
+                            "Max Distance for Nearest (Å)",
+                            min_value=0.1,
+                            max_value=10.0,
+                            value=3.0,
+                            step=0.1,
+                            format="%.1f",
+                            key="swap_max_dist",
+                            help="Maximum distance to consider a target element as 'nearest' to an interstitial element for swapping."
+                        )
+
+                    st.markdown("**Preview of Swaps to be Performed:**")
+                    if interstitial_el_swap and target_el_swap and num_swaps > 0:
+                        st.info(
+                            f"Will attempt to swap **{num_swaps}** pairs of **'{interstitial_el_swap}'** and **'{target_el_swap}'** atoms, prioritizing the nearest pairs within **{max_swap_distance:.1f} Å**.")
+                    else:
+                        st.warning("Please select valid elements and number of swaps.")
                 elif operation_mode == "Substitute Atoms":
                     st.markdown("**Substitute Atoms Settings**")
                     sub_c1, sub_c2 = st.columns(2)
@@ -1965,7 +2105,94 @@ if st.session_state.uploaded_files:
                             st.info("No substitutions will be made with current settings.")
                     else:
                         st.warning("No elements for substitution.")
+                elif operation_mode == "Apply Atomic Displacements":
+                    st.markdown("**Apply Atomic Displacements Settings**")
+                    st.info(
+                        "💡 This will randomly displace each atom from its original position. Useful for simulating thermal disorder or creating perturbed structures.")
 
+                    disp_c1, disp_c2 = st.columns(2)
+
+                    with disp_c1:
+                        displacement_mode = st.selectbox(
+                            "Displacement Mode",
+                            ["uniform", "gaussian"],
+                            index=0,
+                            key="disp_mode",
+                            help="Uniform: equal probability in all directions within max distance\nGaussian: normal distribution centered at original position"
+                        )
+                        # Store in session state
+                        st.session_state.displacement_mode = displacement_mode
+
+                        if displacement_mode == "uniform":
+                            max_displacement = st.number_input(
+                                "Maximum displacement (Å)",
+                                min_value=0.01,
+                                max_value=2.0,
+                                value=0.1,
+                                step=0.01,
+                                format="%.3f",
+                                key="max_disp",
+                                help="Maximum distance each atom can be displaced"
+                            )
+                            st.session_state.max_displacement = max_displacement
+                        else:  # gaussian
+                            std_displacement = st.number_input(
+                                "Standard deviation (Å)",
+                                min_value=0.01,
+                                max_value=1.0,
+                                value=0.05,
+                                step=0.01,
+                                format="%.3f",
+                                key="std_disp",
+                                help="Standard deviation of Gaussian distribution for displacements"
+                            )
+                            st.session_state.std_displacement = std_displacement
+
+                    with disp_c2:
+                        apply_to_all = st.checkbox(
+                            "Apply to all atoms",
+                            value=True,
+                            key="disp_all",
+                            help="If unchecked, you can select specific elements to displace"
+                        )
+                        st.session_state.apply_to_all = apply_to_all
+
+                        coordinate_system = st.selectbox(
+                            "Coordinate System",
+                            ["cartesian", "fractional"],
+                            index=0,
+                            key="disp_coords",
+                            help="Cartesian: displacements in Å\nFractional: displacements relative to cell vectors"
+                        )
+                        st.session_state.coordinate_system = coordinate_system
+
+                    if not apply_to_all:
+                        disp_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+                        st.markdown("**Select elements to displace:**")
+
+                        selected_disp_elements = st.multiselect(
+                            "Elements",
+                            options=disp_els,
+                            default=disp_els,
+                            key="disp_elements",
+                            help="Select which elements should be displaced"
+                        )
+                        st.session_state.selected_disp_elements = selected_disp_elements
+                    else:
+                        st.session_state.selected_disp_elements = None
+
+                    # Preview
+                    st.markdown("**Displacement Preview:**")
+                    total_atoms = len(active_pmg_for_defects)
+                    if apply_to_all:
+                        st.info(f"Will displace all {total_atoms} atoms")
+                    elif not apply_to_all and st.session_state.get('selected_disp_elements'):
+                        n_to_displace = sum(1 for site in active_pmg_for_defects.sites
+                                            if site.specie.symbol in st.session_state.selected_disp_elements)
+                        elements_str = ', '.join(st.session_state.selected_disp_elements)
+                        st.info(f"Will displace {n_to_displace} of {total_atoms} atoms ({elements_str})")
+                    else:
+                        st.warning("No elements selected for displacement")
                # enable_batch = st.checkbox(
                #     "🎲 Enable Batch Generation (Generate multiple configurations with different random seeds)",
                #     value=st.session_state.enable_batch_generation,
@@ -2020,8 +2247,50 @@ if st.session_state.uploaded_files:
                                             modified_struct = substitute_atoms_in_structure(
                                                 base_struct, sub_settings, sub_mode, sub_target, None, seed
                                             )
-                                        else:
-                                            modified_struct = base_struct
+                                        elif operation_mode == "Apply Atomic Displacements":
+                                            modified_struct = apply_atomic_displacements(
+                                                base_struct,
+                                                displacement_mode,
+                                                max_displacement if displacement_mode == "uniform" else None,
+                                                std_displacement if displacement_mode == "gaussian" else None,
+                                                coordinate_system,
+                                                selected_disp_elements if not apply_to_all else None,
+                                                None,  # log_area
+                                                seed)
+                                        if operation_mode == "Swap Nearest Elements":
+                                            el1_batch = st.session_state.get('swap_int_el')
+                                            el2_batch = st.session_state.get('swap_target_el')
+                                            n_swaps_batch = st.session_state.get('swap_num_swaps')
+                                            max_dist_batch = st.session_state.get('swap_max_dist')
+                                            if not all([el1_batch, el2_batch, n_swaps_batch is not None,
+                                                        max_dist_batch is not None]):
+                                                st.error(
+                                                    "Cannot generate batch: Swap parameters are missing. Please configure them in the UI.")
+                                                break
+                                        elif operation_mode == "Create Substitution Cluster":
+                                            orig_el = st.session_state.get('cluster_orig_el')
+                                            sub_el = st.session_state.get('cluster_sub_el')
+                                            num_sub = st.session_state.get('cluster_num_atoms')
+                                            radius = st.session_state.get('cluster_radius_input')
+                                            del_others = st.session_state.get('delete_other_orig_el_cluster', False)
+
+
+                                            if all([orig_el, sub_el, num_sub, radius is not None]):
+                                                modified_struct = create_substitution_cluster(
+                                                    base_struct,
+                                                    orig_el,
+                                                    sub_el,
+                                                    num_sub,
+                                                    radius,
+                                                    None,
+                                                    seed,
+                                                    delete_non_clustered_original_elements=del_others
+                                                )
+                                            else:
+                                                st.warning(
+                                                    f"Skipping config {i + 1}: Cluster parameters not found in session state.")
+                                                modified_struct = base_struct
+
 
                                         st.session_state.generated_structures[config_name] = modified_struct
 
@@ -2136,17 +2405,27 @@ if st.session_state.uploaded_files:
                 if operation_mode == "Insert Interstitials (Voronoi method)":
                     col_preview, col_apply = st.columns(2)
                     with col_preview:
-                        if st.button("Preview Interstitial Sites", key="preview_interstitials_btn", type = "tertiary"):
+                        if st.button("Preview Interstitial Sites", key="preview_interstitials_btn", type="tertiary"):
                             with col_defect_log:
-                                with st.expander("Preview Interstitial Sites", expanded = True):
+                                with st.expander("Preview Interstitial Sites", expanded=True):
                                     st.markdown("###### Interstitial Sites Preview")
                                     with st.spinner("Calculating available interstitials sites..."):
                                         try:
-                                            from pymatgen.analysis.defects.generators import VoronoiInterstitialGenerator
+                                            from pymatgen.analysis.defects.generators import \
+                                                VoronoiInterstitialGenerator
 
                                             generator = VoronoiInterstitialGenerator(clustering_tol=int_clust,
                                                                                      min_dist=int_min_dist)
-                                            unique_interstitial_types = list(generator.generate(active_pmg_for_defects, "H"))
+                                            unique_interstitial_types = list(
+                                                generator.generate(active_pmg_for_defects, "H"))
+
+                                            if include_manual:
+                                                manual_sites = find_octahedral_sites(active_pmg_for_defects,
+                                                                                     min_distance=int_min_dist)
+                                                if manual_sites:
+                                                    manual_type = ManualInterstitialType(manual_sites,
+                                                                                         site_type="Octahedral (Manual)")
+                                                    unique_interstitial_types.append(manual_type)
 
                                             if not unique_interstitial_types:
                                                 st.warning("No interstitial sites found.")
@@ -2155,21 +2434,21 @@ if st.session_state.uploaded_files:
                                                     f"Found {len(unique_interstitial_types)} unique interstitial site types:")
 
                                                 total_sites = 0
-                                                for i_type, interstitial_type_obj in enumerate(unique_interstitial_types):
+                                                for i_type, interstitial_type_obj in enumerate(
+                                                        unique_interstitial_types):
                                                     site_coords = interstitial_type_obj.site.frac_coords
-                                                    site_classification = classify_interstitial_site(active_pmg_for_defects,
-                                                                                                     site_coords)
+                                                    site_classification = classify_interstitial_site(
+                                                        active_pmg_for_defects, site_coords)
                                                     equiv_sites_count = len(interstitial_type_obj.equivalent_sites)
                                                     total_sites += equiv_sites_count
 
-                                                    st.write(f"**Type {i_type + 1}:**")
+                                                    type_name = getattr(interstitial_type_obj, 'site_type', 'Voronoi')
+
+                                                    st.write(f"**Type {i_type + 1} ({type_name}):**")
                                                     st.write(f"  Position: {np.round(site_coords, 4)}")
                                                     st.write(f"  Classification: {site_classification}")
                                                     st.write(f"  Equivalent sites: {equiv_sites_count}")
                                                     st.write("---")
-
-                                                   
-
 
                                                 st.info(f"**Total available interstitial sites: {total_sites}**")
 
@@ -2178,25 +2457,30 @@ if st.session_state.uploaded_files:
                                                 elif 0 < int_type_idx <= len(unique_interstitial_types):
                                                     selected_type = unique_interstitial_types[int_type_idx - 1]
                                                     selected_count = len(selected_type.equivalent_sites)
-                                                    st.write(f"Selected: Type {int_type_idx} ({selected_count} sites)")
+                                                    type_name = getattr(selected_type, 'site_type', 'Voronoi')
+                                                    st.write(
+                                                        f"Selected: Type {int_type_idx} ({type_name}) - {selected_count} sites")
 
                                         except Exception as e:
                                             st.error(f"Error analyzing interstitial sites: {e}")
 
                     with col_apply:
-                        if not st.session_state.enable_batch_generation:
-                            if st.button("Apply Interstitials to Structure", key="apply_interstitials_btn", type="primary"):
-                                init_n = len(active_pmg_for_defects)
-                                mod_struct = insert_interstitials_into_structure(active_pmg_for_defects, int_el, int_n,
-                                                                                 int_type_idx,
-                                                                                 int_mode, int_clust, int_min_dist,
-                                                                                 int_target, col_defect_log)
-                                if len(mod_struct) > init_n:
-                                    st.session_state.current_structure = mod_struct
-                                    st.session_state.helpful = True
-                                    with col_defect_log:
-                                        st.success("Interstitials applied to structure.")
-                                    st.rerun()
+                        with col_apply:
+                            if not st.session_state.enable_batch_generation:
+                                if st.button("Apply Interstitials to Structure", key="apply_interstitials_btn",
+                                             type="primary"):
+                                    init_n = len(active_pmg_for_defects)
+                                    mod_struct = insert_interstitials_into_structure(
+                                        active_pmg_for_defects, int_el, int_n,
+                                        int_type_idx, int_mode, int_clust, int_min_dist,
+                                        int_target, col_defect_log, include_manual_sites=include_manual
+                                    )
+                                    if len(mod_struct) > init_n:
+                                        st.session_state.current_structure = mod_struct
+                                        st.session_state.helpful = True
+                                        with col_defect_log:
+                                            st.success("Interstitials applied to structure.")
+                                        st.rerun()
                                 else:
                                     with col_defect_log:
                                         st.warning("No interstitials were added to the structure.")
@@ -2223,7 +2507,56 @@ if st.session_state.uploaded_files:
                         mod_struct = substitute_atoms_in_structure(mod_struct, sub_settings, sub_mode, sub_target,
                                                                    col_defect_log)
                         if mod_struct.composition != init_comp: changed = True
+                    elif operation_mode == "Apply Atomic Displacements":
+                        init_positions = np.array([site.frac_coords for site in mod_struct.sites])
+                        mod_struct = apply_atomic_displacements(
+                            mod_struct,
+                            displacement_mode,
+                            max_displacement if displacement_mode == "uniform" else None,
+                            std_displacement if displacement_mode == "gaussian" else None,
+                            coordinate_system,
+                            selected_disp_elements if not apply_to_all else None,
+                            col_defect_log
+                        )
 
+                        new_positions = np.array([site.frac_coords for site in mod_struct.sites])
+                        if not np.allclose(init_positions, new_positions, atol=1e-6):
+                            changed = True
+                    elif operation_mode == "Create Substitution Cluster":  # <-- Modified this section
+                        init_comp = mod_struct.composition
+                        init_n = len(mod_struct)
+                        mod_struct = create_substitution_cluster(
+                            mod_struct,
+                            orig_element,
+                            sub_element,
+                            num_to_substitute,
+                            cluster_radius_input,
+                            col_defect_log,
+                            delete_non_clustered_original_elements=delete_others  # <-- Pass the new parameter
+                        )
+                        if mod_struct.composition != init_comp or len(mod_struct) != init_n:
+                            changed = True
+                    elif operation_mode == "Swap Nearest Elements":
+                        initial_coords_species = [(site.frac_coords.tolist(), site.specie.symbol) for site in
+                                                  mod_struct.sites]
+
+                        mod_struct = swap_nearest_elements(
+                            mod_struct,
+                            st.session_state.swap_int_el,
+                            st.session_state.swap_target_el,
+                            st.session_state.swap_num_swaps,
+                            st.session_state.swap_max_dist,
+                            col_defect_log,
+                            random_seed=None
+                        )
+
+                        final_coords_species = [(site.frac_coords.tolist(), site.specie.symbol) for site in
+                                                mod_struct.sites]
+
+                        if initial_coords_species != final_coords_species:
+                            changed = True
+                        else:
+                            changed = False
                     st.session_state.current_structure = mod_struct
                     st.session_state.helpful = changed
                     with col_defect_log:
@@ -2472,14 +2805,22 @@ if st.session_state.uploaded_files:
                     f"⚠️ Structure has {total_atoms} atoms (≥5000). Visualization disabled for performance. Download options available below.")
                 ase_to_visualize = AseAtomsAdaptor.get_atoms(pmg_to_visualize)
 
-            # Download section (shown for all structures regardless of size)
             st.markdown("##### Download Options")
-            fmt_dl = st.radio("Format", ("CIF", "VASP", "LAMMPS", "XYZ"), horizontal=True, key="dl_fmt_radio")
+
             base_fn_dl = st.session_state.selected_file.split('.')[0] if st.session_state.selected_file else "custom"
             applied_cell_fn = st.session_state.applied_cell_type_name
             sc_factors_fn = f"SC{st.session_state.applied_supercell_n_a}x{st.session_state.applied_supercell_n_b}x{st.session_state.applied_supercell_n_c}"
             suffix_fn = f"{applied_cell_fn}_{sc_factors_fn}" if st.session_state.supercell_settings_applied else applied_cell_fn
+            default_filename_base = f"{base_fn_dl}_{suffix_fn}"
 
+            custom_filename_base = st.text_input(
+                "Enter desired filename (without extension):",
+                value=default_filename_base,
+                key="custom_filename_input",
+                help="The file extension will be added automatically based on the selected format."
+            )
+
+            fmt_dl = st.radio("Format", ("CIF", "VASP", "LAMMPS", "XYZ"), horizontal=True, key="dl_fmt_radio")
 
             if fmt_dl == "VASP":
                 colsss, colyyy = st.columns([1, 1])
@@ -2500,15 +2841,16 @@ if st.session_state.uploaded_files:
                     include_masses = st.checkbox("Include atomic masses", value=True, key="lmp_masses_dl")
                     force_skew = st.checkbox("Force triclinic cell (skew)", value=False, key="lmp_skew_dl")
 
-
             if st.button(f"Download {fmt_dl}", type="primary", key=f"dl_btn_{fmt_dl}"):
                 try:
+                    sanitized_filename_base = re.sub(r'[\\/*?:"<>|]', "_", custom_filename_base)
+
                     if fmt_dl == "CIF":
                         if st.session_state.supercell_settings_applied or st.session_state.helpful:
                             dl_content = str(CifWriter(pmg_to_visualize, symprec=None, refine_struct=False))
                         else:
                             dl_content = str(CifWriter(pmg_to_visualize, symprec=0.001, refine_struct=False))
-                        dl_name = f"{base_fn_dl}_{suffix_fn}.cif"
+                        dl_name = f"{sanitized_filename_base}.cif"
                         dl_mime = "chemical/x-cif"
 
                     elif fmt_dl == "VASP":
@@ -2520,7 +2862,7 @@ if st.session_state.uploaded_files:
                         sio = StringIO()
                         write(sio, ase_to_visualize, format="vasp", direct=use_fractional, sort=True)
                         dl_content = sio.getvalue()
-                        dl_name = f"{base_fn_dl}_{suffix_fn}.poscar"
+                        dl_name = f"{sanitized_filename_base}.poscar"
                         dl_mime = "text/plain"
 
                     elif fmt_dl == "LAMMPS":
@@ -2528,7 +2870,7 @@ if st.session_state.uploaded_files:
                         write(sio, ase_to_visualize, format="lammps-data",
                               atom_style=atom_style, units=units, masses=include_masses, force_skew=force_skew)
                         dl_content = sio.getvalue()
-                        dl_name = f"{base_fn_dl}_{suffix_fn}_{atom_style}.lmp"
+                        dl_name = f"{sanitized_filename_base}_{atom_style}.lmp"
                         dl_mime = "text/plain"
 
                     elif fmt_dl == "XYZ":
@@ -2548,10 +2890,9 @@ if st.session_state.uploaded_files:
                             xyz_lines.append(f"{element} {coord[0]:.6f} {coord[1]:.6f} {coord[2]:.6f}")
 
                         dl_content = "\n".join(xyz_lines)
-                        dl_name = f"{base_fn_dl}_{suffix_fn}.xyz"
+                        dl_name = f"{sanitized_filename_base}.xyz"
                         dl_mime = "chemical/x-xyz"
 
-                    # Trigger download
                     st.download_button(
                         label=f"💾 Save {fmt_dl} File",
                         data=dl_content,
