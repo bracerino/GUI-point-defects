@@ -1668,7 +1668,8 @@ if st.session_state.uploaded_files:
                     st.warning(
                         f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}).")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
-                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster", "Swap Nearest Elements"]
+                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster",
+                                                 "Swap Nearest Elements","Create Compressed Bubble"]
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
                 operation_mode = st.selectbox("Choose Defect Operation", current_defect_op_options, key=op_mode_key)
@@ -1979,7 +1980,235 @@ if st.session_state.uploaded_files:
                             st.info("No vacancies will be created with current settings.")
                     else:
                         st.warning("No elements for vacancies.")
-                elif operation_mode == "Swap Nearest Elements":  # NEW BLOCK STARTS HERE
+
+                elif operation_mode == "Create Compressed Bubble":
+                    st.markdown("**Create Compressed Bubble Settings**")
+                    st.info(
+                        "Creates a spherical void by removing atoms, then fills it with a specified number of atoms. "
+                        "Useful for simulating gas-filled voids, precipitates, or compressed phases.")
+
+                    enable_second_bubble = st.checkbox(
+                        "Enable Second Bubble",
+                        value=False,
+                        key="enable_second_bubble",
+                        help="Create two bubbles with centers placed as far apart as possible"
+                    )
+
+                    st.markdown("**First Bubble:**")
+                    bubble_c1, bubble_c2, bubble_c3 = st.columns(3)
+
+                    with bubble_c1:
+                        bubble_radius = st.number_input(
+                            "Bubble Radius (Å)",
+                            min_value=1.0,
+                            max_value=20.0,
+                            value=4.0,
+                            step=0.5,
+                            format="%.1f",
+                            key="bubble_radius",
+                            help="Radius of the spherical bubble region"
+                        )
+
+                    with bubble_c2:
+                        bubble_n_atoms = st.number_input(
+                            "Number of Atoms",
+                            min_value=1,
+                            max_value=10000,
+                            value=50,
+                            step=1,
+                            key="bubble_n_atoms",
+                            help="Number of atoms to place inside the bubble"
+                        )
+
+                    with bubble_c3:
+                        bubble_min_dist = st.number_input(
+                            "Min Interatomic Dist. (Å)",
+                            min_value=0.5,
+                            max_value=5.0,
+                            value=1.5,
+                            step=0.1,
+                            format="%.1f",
+                            key="bubble_min_dist",
+                            help="Minimum distance between atoms inside bubble"
+                        )
+
+                    st.markdown("**Bubble Center Location:**")
+                    center_mode_col1, center_mode_col2 = st.columns(2)
+
+                    with center_mode_col1:
+                        center_selection_mode = st.selectbox(
+                            "Center Selection Method",
+                            ["Random", "Manual Coordinates", "Near Element"],
+                            key="bubble_center_mode",
+                            help="Choose how to determine the first bubble center"
+                        )
+
+                    bubble_center_coords = None
+
+                    if center_selection_mode == "Manual Coordinates":
+                        st.markdown("**Fractional Coordinates (0-1):**")
+                        coord_cols = st.columns(3)
+                        with coord_cols[0]:
+                            center_x = st.number_input("x", 0.0, 1.0, 0.5, 0.01, format="%.3f", key="bubble_x")
+                        with coord_cols[1]:
+                            center_y = st.number_input("y", 0.0, 1.0, 0.5, 0.01, format="%.3f", key="bubble_y")
+                        with coord_cols[2]:
+                            center_z = st.number_input("z", 0.0, 1.0, 0.5, 0.01, format="%.3f", key="bubble_z")
+                        bubble_center_coords = np.array([center_x, center_y, center_z])
+
+                    elif center_selection_mode == "Near Element":
+                        available_elements = sorted(
+                            list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+                        with center_mode_col2:
+                            center_near_element = st.selectbox(
+                                "Place near:",
+                                options=available_elements,
+                                key="bubble_near_element",
+                                help="Bubble will be centered near a random atom of this element"
+                            )
+
+                    st.markdown("**Elements to Fill Bubble:**")
+                    bubble_elements = st.multiselect(
+                        "Select Element(s)",
+                        options=ELEMENTS,
+                        default=["He"],
+                        key="bubble_fill_elements",
+                        help="Elements to place inside the bubble (will be distributed evenly if multiple)"
+                    )
+
+                    bubble2_radius = None
+                    bubble2_n_atoms = None
+                    bubble2_elements = None
+
+                    if enable_second_bubble:
+                        st.markdown("---")
+                        st.markdown("**Second Bubble:**")
+
+                        bubble2_c1, bubble2_c2, bubble2_c3 = st.columns(3)
+
+                        with bubble2_c1:
+                            bubble2_radius = st.number_input(
+                                "Bubble 2 Radius (Å)",
+                                min_value=1.0,
+                                max_value=20.0,
+                                value=3.0,
+                                step=0.5,
+                                format="%.1f",
+                                key="bubble2_radius",
+                                help="Radius of the second bubble"
+                            )
+
+                        with bubble2_c2:
+                            bubble2_n_atoms = st.number_input(
+                                "Bubble 2 Atoms",
+                                min_value=1,
+                                max_value=10000,
+                                value=30,
+                                step=1,
+                                key="bubble2_n_atoms",
+                                help="Number of atoms in second bubble"
+                            )
+
+                        with bubble2_c3:
+                            st.info("Uses same min distance")
+
+                        st.markdown("**Elements for Second Bubble:**")
+                        bubble2_elements = st.multiselect(
+                            "Select Element(s) for Bubble 2",
+                            options=ELEMENTS,
+                            default=["He"],
+                            key="bubble2_fill_elements",
+                            help="Elements for second bubble"
+                        )
+
+                        st.info(
+                            "ℹ️ Second bubble center will be automatically placed as far as possible from the first bubble")
+
+                    bubble_volume = (4.0 / 3.0) * np.pi * (bubble_radius ** 3)
+                    resulting_density = bubble_n_atoms / bubble_volume if bubble_volume > 0 else 0
+
+                    typical_solid_density = 0.08
+                    estimated_atoms_removed = int(bubble_volume * typical_solid_density)
+
+                    st.markdown("**Density Reference:**")
+                    density_info_cols = st.columns(3)
+                    with density_info_cols[0]:
+                        st.caption("**Gases:** 0.0005-0.01 atoms/Å³")
+                    with density_info_cols[1]:
+                        st.caption("**Liquids:** 0.03-0.08 atoms/Å³")
+                    with density_info_cols[2]:
+                        st.caption("**Solids:** 0.05-0.15 atoms/Å³")
+
+                    st.markdown("**Preview - First Bubble:**")
+
+                    if resulting_density < 0.01:
+                        bubble_type = "Low-density gas"
+                        density_color = "blue"
+                    elif resulting_density < 0.03:
+                        bubble_type = "High-density gas / vapor"
+                        density_color = "blue"
+                    elif resulting_density < 0.08:
+                        bubble_type = "Liquid-like"
+                        density_color = "orange"
+                    else:
+                        bubble_type = "Solid-like / highly compressed"
+                        density_color = "red"
+
+                    preview_text = f"""
+                    • **Bubble volume:** {bubble_volume:.1f} Å³  
+                    • **Atoms to remove:** ~{estimated_atoms_removed} (estimate from host)  
+                    • **Atoms to insert:** {bubble_n_atoms}  
+                    • **Resulting density:** {resulting_density:.4f} atoms/Å³  
+                    • **Classification:** :{density_color}[{bubble_type}]  
+                    • **Elements:** {', '.join(bubble_elements) if bubble_elements else 'None selected'}
+                    """
+
+                    st.info(preview_text)
+
+                    max_reasonable_density = bubble_n_atoms / ((4.0 / 3.0) * np.pi * (bubble_min_dist / 2.0) ** 3)
+                    if resulting_density > max_reasonable_density:
+                        st.warning(
+                            f"⚠️ Warning: Requested density may be too high. With min distance {bubble_min_dist:.1f} Å, "
+                            f"maximum achievable density is ~{max_reasonable_density:.4f} atoms/Å³. "
+                            f"Consider reducing number of atoms or increasing bubble radius.")
+
+                    if enable_second_bubble and bubble2_radius and bubble2_n_atoms:
+                        st.markdown("**Preview - Second Bubble:**")
+
+                        bubble2_volume = (4.0 / 3.0) * np.pi * (bubble2_radius ** 3)
+                        resulting_density2 = bubble2_n_atoms / bubble2_volume if bubble2_volume > 0 else 0
+                        estimated_atoms_removed2 = int(bubble2_volume * typical_solid_density)
+
+                        if resulting_density2 < 0.01:
+                            bubble_type2 = "Low-density gas"
+                            density_color2 = "blue"
+                        elif resulting_density2 < 0.03:
+                            bubble_type2 = "High-density gas / vapor"
+                            density_color2 = "blue"
+                        elif resulting_density2 < 0.08:
+                            bubble_type2 = "Liquid-like"
+                            density_color2 = "orange"
+                        else:
+                            bubble_type2 = "Solid-like / highly compressed"
+                            density_color2 = "red"
+
+                        preview_text2 = f"""
+                        • **Bubble volume:** {bubble2_volume:.1f} Å³  
+                        • **Atoms to remove:** ~{estimated_atoms_removed2} (estimate)  
+                        • **Atoms to insert:** {bubble2_n_atoms}  
+                        • **Resulting density:** {resulting_density2:.4f} atoms/Å³  
+                        • **Classification:** :{density_color2}[{bubble_type2}]  
+                        • **Elements:** {', '.join(bubble2_elements) if bubble2_elements else 'None selected'}
+                        """
+
+                        st.info(preview_text2)
+
+                        st.markdown("**Total Preview:**")
+                        total_atoms_removed = estimated_atoms_removed + estimated_atoms_removed2
+                        total_atoms_inserted = bubble_n_atoms + bubble2_n_atoms
+                        st.success(
+                            f"Total: ~{total_atoms_removed} atoms removed, {total_atoms_inserted} atoms inserted")
+                elif operation_mode == "Swap Nearest Elements":
                     st.markdown("**Swap Nearest Elements Settings**")
                     st.info(
                         "This operation identifies atoms of the 'Interstitial Element' and their nearest neighbors of the 'Target Element', then swaps their identities. Useful for studying antisite defects or interstitial migration."
@@ -2250,6 +2479,73 @@ if st.session_state.uploaded_files:
                                                 base_struct, int_el_fast, int_n_fast, int_min_dist_fast,
                                                 int_grid_spacing, int_mode_fast, int_min_int_dist, None, seed
                                             )
+                                        elif operation_mode == "Create Compressed Bubble":
+                                            bubble_radius_batch = st.session_state.get('bubble_radius')
+                                            bubble_n_atoms_batch = st.session_state.get('bubble_n_atoms')
+                                            bubble_min_dist_batch = st.session_state.get('bubble_min_dist')
+                                            bubble_elements_batch = st.session_state.get('bubble_fill_elements')
+                                            enable_second_batch = st.session_state.get('enable_second_bubble', False)
+
+                                            bubble2_radius_batch = st.session_state.get('bubble2_radius')
+                                            bubble2_n_atoms_batch = st.session_state.get('bubble2_n_atoms')
+                                            bubble2_elements_batch = st.session_state.get('bubble2_fill_elements')
+
+                                            if not enable_second_batch:
+                                                bubble_center_coords = np.random.rand(3)
+
+                                                if all([bubble_radius_batch, bubble_n_atoms_batch,
+                                                        bubble_elements_batch]):
+                                                    modified_struct = create_compressed_bubble(
+                                                        base_struct,
+                                                        bubble_radius_batch,
+                                                        bubble_center_coords,
+                                                        bubble_elements_batch,
+                                                        bubble_n_atoms_batch,
+                                                        bubble_min_dist_batch,
+                                                        None,
+                                                        seed
+                                                    )
+                                                else:
+                                                    st.warning(f"Skipping config {i + 1}: Bubble parameters not found")
+                                                    modified_struct = base_struct
+                                            else:
+                                                center1_frac, center2_frac, _ = find_farthest_bubble_centers(
+                                                    base_struct,
+                                                    "Random",
+                                                    None,
+                                                    None,
+                                                    bubble_radius_batch,
+                                                    bubble2_radius_batch,
+                                                    seed
+                                                )
+
+                                                modified_struct = base_struct.copy()
+
+                                                if all([bubble_radius_batch, bubble_n_atoms_batch,
+                                                        bubble_elements_batch]):
+                                                    modified_struct = create_compressed_bubble(
+                                                        modified_struct,
+                                                        bubble_radius_batch,
+                                                        center1_frac,
+                                                        bubble_elements_batch,
+                                                        bubble_n_atoms_batch,
+                                                        bubble_min_dist_batch,
+                                                        None,
+                                                        seed
+                                                    )
+
+                                                if all([bubble2_radius_batch, bubble2_n_atoms_batch,
+                                                        bubble2_elements_batch]):
+                                                    modified_struct = create_compressed_bubble(
+                                                        modified_struct,
+                                                        bubble2_radius_batch,
+                                                        center2_frac,
+                                                        bubble2_elements_batch,
+                                                        bubble2_n_atoms_batch,
+                                                        bubble_min_dist_batch,
+                                                        None,
+                                                        seed
+                                                    )
                                         elif operation_mode == "Insert Interstitials (Voronoi method)":
                                             modified_struct = insert_interstitials_into_structure(
                                                 base_struct, int_el, int_n, int_type_idx, int_mode,
@@ -2504,6 +2800,7 @@ if st.session_state.uploaded_files:
                 elif not st.session_state.enable_batch_generation and st.button("Apply Selected Defect Operation", key="apply_defect_op_btn", type = 'primary'):
                     mod_struct = active_pmg_for_defects.copy()
                     changed = False
+                    random_seed = None
                     with col_defect_log:
                         st.markdown(f"###### Log: {operation_mode}")
 
@@ -2538,6 +2835,86 @@ if st.session_state.uploaded_files:
                         new_positions = np.array([site.frac_coords for site in mod_struct.sites])
                         if not np.allclose(init_positions, new_positions, atol=1e-6):
                             changed = True
+                    elif operation_mode == "Create Compressed Bubble":
+                        if not enable_second_bubble:
+                            if center_selection_mode == "Random":
+                                bubble_center_coords = np.random.rand(3)
+                            elif center_selection_mode == "Near Element":
+                                element_sites = [i for i, site in enumerate(mod_struct.sites)
+                                                 if site.specie.symbol == center_near_element]
+                                if element_sites:
+                                    random_site_idx = random.choice(element_sites)
+                                    bubble_center_coords = mod_struct.sites[random_site_idx].frac_coords
+                                else:
+                                    bubble_center_coords = np.array([0.5, 0.5, 0.5])
+                                    if col_defect_log:
+                                        col_defect_log.warning(f"Element {center_near_element} not found, using center")
+
+                            if bubble_elements and bubble_n_atoms > 0:
+                                init_n = len(mod_struct)
+                                mod_struct = create_compressed_bubble(
+                                    mod_struct,
+                                    bubble_radius,
+                                    bubble_center_coords,
+                                    bubble_elements,
+                                    bubble_n_atoms,
+                                    bubble_min_dist,
+                                    col_defect_log,
+                                    random_seed
+                                )
+                                if len(mod_struct) != init_n:
+                                    changed = True
+                            else:
+                                if col_defect_log:
+                                    if not bubble_elements:
+                                        col_defect_log.warning("No elements selected for bubble filling")
+                                    if bubble_n_atoms == 0:
+                                        col_defect_log.warning("Number of atoms is zero")
+
+                        else:
+                            center1_frac, center2_frac, separation = find_farthest_bubble_centers(
+                                mod_struct,
+                                center_selection_mode,
+                                bubble_center_coords,
+                                center_near_element if center_selection_mode == "Near Element" else None,
+                                bubble_radius,
+                                bubble2_radius,
+                                random_seed
+                            )
+
+                            if col_defect_log:
+                                col_defect_log.info(f"Bubble centers separation: {separation:.2f} Å")
+                                col_defect_log.write(f"Bubble 1 center (frac): {center1_frac}")
+                                col_defect_log.write(f"Bubble 2 center (frac): {center2_frac}")
+
+                            init_n = len(mod_struct)
+
+                            if bubble_elements and bubble_n_atoms > 0:
+                                mod_struct = create_compressed_bubble(
+                                    mod_struct,
+                                    bubble_radius,
+                                    center1_frac,
+                                    bubble_elements,
+                                    bubble_n_atoms,
+                                    bubble_min_dist,
+                                    col_defect_log,
+                                    random_seed
+                                )
+
+                            if bubble2_elements and bubble2_n_atoms > 0:
+                                mod_struct = create_compressed_bubble(
+                                    mod_struct,
+                                    bubble2_radius,
+                                    center2_frac,
+                                    bubble2_elements,
+                                    bubble2_n_atoms,
+                                    bubble_min_dist,
+                                    col_defect_log,
+                                    random_seed
+                                )
+
+                            if len(mod_struct) != init_n:
+                                changed = True
                     elif operation_mode == "Create Substitution Cluster":  # <-- Modified this section
                         init_comp = mod_struct.composition
                         init_n = len(mod_struct)
