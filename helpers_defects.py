@@ -83,23 +83,182 @@ from scipy.optimize import differential_evolution
 import warnings
 
 
+def create_compressed_bubble(structure_obj, bubble_radius, center_coords,
+                             element_symbols, n_atoms_to_insert,
+                             min_interatomic_distance=1.0,
+                             log_area=None, random_seed=None):
+    from pymatgen.core import Element
+    import numpy as np
+    import random
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    center_coords = np.array(center_coords) % 1.0
+
+    bubble_volume = (4.0 / 3.0) * np.pi * (bubble_radius ** 3)
+    resulting_density = n_atoms_to_insert / bubble_volume if bubble_volume > 0 else 0
+
+    if log_area:
+        log_area.info(f"Creating compressed bubble with radius {bubble_radius:.2f} Å")
+        log_area.write(f"Center (fractional): [{center_coords[0]:.3f}, {center_coords[1]:.3f}, {center_coords[2]:.3f}]")
+        log_area.write(f"Bubble volume: {bubble_volume:.2f} Å³")
+        log_area.write(f"Inserting {n_atoms_to_insert} atoms → density: {resulting_density:.4f} atoms/Å³")
+
+    new_structure = structure_obj.copy()
+
+    center_cart = new_structure.lattice.get_cartesian_coords(center_coords)
+    lattice_matrix = new_structure.lattice.matrix
+
+    indices_to_remove = []
+    for i, site in enumerate(new_structure.sites):
+        site_cart = site.coords
+
+        delta = site_cart - center_cart
+
+        min_distance = float('inf')
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                for dz in [-1, 0, 1]:
+                    offset = np.dot([dx, dy, dz], lattice_matrix)
+                    dist = np.linalg.norm(delta + offset)
+                    min_distance = min(min_distance, dist)
+
+        if min_distance <= bubble_radius:
+            indices_to_remove.append(i)
+
+    if log_area:
+        log_area.write(f"Removing {len(indices_to_remove)} atoms within radius {bubble_radius:.2f} Å")
+
+    for idx in sorted(indices_to_remove, reverse=True):
+        new_structure.remove_sites([idx])
+
+    if n_atoms_to_insert == 0:
+        if log_area:
+            log_area.warning("No atoms to insert (n_atoms = 0)")
+        return new_structure
+
+    inserted_atoms = []
+    attempts = 0
+    max_attempts = n_atoms_to_insert * 10000
+
+    while len(inserted_atoms) < n_atoms_to_insert and attempts < max_attempts:
+        attempts += 1
+
+        while True:
+            random_point = np.random.uniform(-1, 1, 3)
+            if np.linalg.norm(random_point) <= 1.0:
+                break
+
+        random_point *= bubble_radius
+
+        point_cart = center_cart + random_point
+
+        too_close = False
+        for existing_atom_cart in inserted_atoms:
+            if np.linalg.norm(point_cart - existing_atom_cart) < min_interatomic_distance:
+                too_close = True
+                break
+
+        if not too_close:
+            inserted_atoms.append(point_cart)
+
+    if log_area:
+        if len(inserted_atoms) < n_atoms_to_insert:
+            log_area.warning(
+                f"Could only place {len(inserted_atoms)} of {n_atoms_to_insert} atoms after {max_attempts} attempts")
+            log_area.info(f"Try reducing the number of atoms or increasing minimum distance")
+        else:
+            log_area.write(f"Successfully placed {len(inserted_atoms)} atoms after {attempts} attempts")
+
+    if len(inserted_atoms) > 0:
+        for i, atom_cart in enumerate(inserted_atoms):
+            atom_frac = new_structure.lattice.get_fractional_coords(atom_cart)
+
+            atom_frac = atom_frac % 1.0
+
+            element = Element(element_symbols[i % len(element_symbols)])
+
+            new_structure.append(
+                species=element,
+                coords=atom_frac,
+                coords_are_cartesian=False,
+                validate_proximity=False
+            )
+
+        if log_area:
+            elements_used = ', '.join(set(element_symbols))
+            log_area.success(f"Compressed bubble created with {len(inserted_atoms)} atoms ({elements_used})")
+
+    return new_structure
+
+
+def find_farthest_bubble_centers(structure_obj, bubble1_center_mode, bubble1_center_coords,
+                                 bubble1_center_element, bubble1_radius, bubble2_radius,
+                                 random_seed=None):
+    import numpy as np
+    import random
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
+        random.seed(random_seed)
+
+    lattice_matrix = structure_obj.lattice.matrix
+    cell_lengths = structure_obj.lattice.abc
+
+    if bubble1_center_mode == "Random":
+        center1_frac = np.random.rand(3)
+    elif bubble1_center_mode == "Manual Coordinates":
+        center1_frac = np.array(bubble1_center_coords) % 1.0
+    elif bubble1_center_mode == "Near Element":
+        element_sites = [i for i, site in enumerate(structure_obj.sites)
+                         if site.specie.symbol == bubble1_center_element]
+        if element_sites:
+            random_site_idx = random.choice(element_sites)
+            center1_frac = structure_obj.sites[random_site_idx].frac_coords
+        else:
+            center1_frac = np.array([0.5, 0.5, 0.5])
+    else:
+        center1_frac = np.array([0.5, 0.5, 0.5])
+
+    center1_frac = center1_frac % 1.0
+
+    center1_cart = structure_obj.lattice.get_cartesian_coords(center1_frac)
+
+    best_center2_frac = None
+    max_distance = 0
+
+    n_samples = 5000
+
+    for _ in range(n_samples):
+        candidate_frac = np.random.rand(3)
+        candidate_cart = structure_obj.lattice.get_cartesian_coords(candidate_frac)
+
+        delta = candidate_cart - center1_cart
+
+        min_dist = float('inf')
+        for i in [-1, 0, 1]:
+            for j in [-1, 0, 1]:
+                for k in [-1, 0, 1]:
+                    offset = np.dot([i, j, k], lattice_matrix)
+                    dist = np.linalg.norm(delta + offset)
+                    min_dist = min(min_dist, dist)
+
+        effective_distance = min_dist - bubble1_radius - bubble2_radius
+
+        if effective_distance > max_distance:
+            max_distance = effective_distance
+            best_center2_frac = candidate_frac
+
+    best_center2_frac = best_center2_frac % 1.0
+
+    return center1_frac, best_center2_frac, max_distance + bubble1_radius + bubble2_radius
+
+
 def swap_nearest_elements(structure_obj, el1_symbol, el2_symbol, n_swaps, max_distance, log_area=None,
                           random_seed=None):
-    """
-    Swaps a specified number of nearest pairs between two elements.
 
-    Args:
-        structure_obj (pymatgen.core.Structure): The input crystal structure.
-        el1_symbol (str): Symbol of the first element (e.g., the interstitial).
-        el2_symbol (str): Symbol of the second element (e.g., the host atom).
-        n_swaps (int): The number of element pairs to swap.
-        max_distance (float): Maximum distance (in Angstroms) to consider for "nearest" pairs.
-        log_area (streamlit.delta_generator.DeltaGenerator, optional): Streamlit area for logging.
-        random_seed (int, optional): Seed for random operations.
-
-    Returns:
-        pymatgen.core.Structure: The modified structure with elements swapped.
-    """
     if log_area:
         log_area.info(
             f"Attempting to swap {n_swaps} nearest '{el1_symbol}' with '{el2_symbol}' within {max_distance:.2f} Å.")
