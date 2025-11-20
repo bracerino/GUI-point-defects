@@ -239,6 +239,7 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
                     data=poscar_content,
                     file_name=filename,
                     mime="text/plain",
+                    type="primary",
                     key="sd_actual_download_single"
                 )
 
