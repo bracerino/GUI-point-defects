@@ -303,6 +303,7 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
                     data=zip_buffer.getvalue(),
                     file_name="selective_dynamics_poscars.zip",
                     mime="application/zip",
+                    type="primary",
                     key="sd_actual_download_batch"
                 )
 
