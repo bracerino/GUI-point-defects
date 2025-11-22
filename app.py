@@ -196,27 +196,23 @@ enable_selective_dynamics = st.checkbox(
 if enable_selective_dynamics:
     import streamlit as st
 
-    import streamlit as st
-
-    import streamlit as st
-
     st.markdown(
-        """
-        <div style="
-            background-color:#e8f0fe;
-            border-left:6px solid #1a73e8;
-            padding:10px;
-            border-radius:6px;
-            font-size:18px;
-            margin:10px 0;
-            display:inline-block;
-        ">
-            <a href="https://youtu.be/dvC8ohlW51k?si=_dbiRbLesVvRy8bw" target="_blank" style="color:#1a73e8; text-decoration:none; font-weight:bold;">
-                🎥 Tutorial at YouTube
-            </a>
-        </div>
-        """,
-        unsafe_allow_html=True
+    """
+    <div style="
+        background-color:#e8f0fe;
+        border-left:6px solid #1a73e8;
+        padding:10px;
+        border-radius:6px;
+        font-size:18px;
+        margin:10px 0;
+        display:inline-block;
+    ">
+        <a href="https://youtu.be/dvC8ohlW51k?si=_dbiRbLesVvRy8bw" target="_blank" style="text-decoration:none;">
+            🎥 Tutorial at YouTube
+        </a>
+    </div>
+    """,
+    unsafe_allow_html=True
     )
 
 
