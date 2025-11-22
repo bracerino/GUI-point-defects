@@ -196,24 +196,27 @@ enable_selective_dynamics = st.checkbox(
 if enable_selective_dynamics:
     import streamlit as st
 
+    import streamlit as st
+
     st.markdown(
         """
-        <div style="
-            background-color:#e8f0fe;
-            border-left:6px solid #1a73e8;
-            padding:15px;
-            border-radius:6px;
-            font-size:18px;
-            margin:10px 0;
-        ">
-            <strong>📌 Tutorial at YouTube:</strong><br>
-            <a href="https://youtu.be/dvC8ohlW51k?si=_dbiRbLesVvRy8bw" target="_blank">
-                Click here to watch
-            </a>
-        </div>
+        <a href="https://youtu.be/dvC8ohlW51k?si=_dbiRbLesVvRy8bw" target="_blank" 
+           style="
+               display:inline-block;
+               background-color:#e8f0fe;
+               color:#1a73e8;
+               padding:12px 20px;
+               border-radius:8px;
+               font-size:18px;
+               text-decoration:none;
+               font-weight:bold;
+           ">
+            🎥 Tutorial at YouTube
+        </a>
         """,
         unsafe_allow_html=True
     )
+
 
     if 'full_structures' in st.session_state and st.session_state.full_structures:
         render_selective_dynamics_ui(
