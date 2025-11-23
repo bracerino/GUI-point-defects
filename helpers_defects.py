@@ -86,7 +86,7 @@ import warnings
 def create_compressed_bubble(structure_obj, bubble_radius, center_coords,
                              element_symbols, n_atoms_to_insert,
                              min_interatomic_distance=1.0,
-                             log_area=None, random_seed=None):
+                             log_area=None, random_seed=None, replace_in_place=False):
     from pymatgen.core import Element
     import numpy as np
     import random
@@ -98,13 +98,19 @@ def create_compressed_bubble(structure_obj, bubble_radius, center_coords,
     center_coords = np.array(center_coords) % 1.0
 
     bubble_volume = (4.0 / 3.0) * np.pi * (bubble_radius ** 3)
-    resulting_density = n_atoms_to_insert / bubble_volume if bubble_volume > 0 else 0
+
+    if not replace_in_place:
+        resulting_density = n_atoms_to_insert / bubble_volume if bubble_volume > 0 else 0
 
     if log_area:
-        log_area.info(f"Creating compressed bubble with radius {bubble_radius:.2f} Å")
+        if replace_in_place:
+            log_area.info(f"Creating substitution sphere (replace in place) with radius {bubble_radius:.2f} Å")
+        else:
+            log_area.info(f"Creating compressed bubble with radius {bubble_radius:.2f} Å")
         log_area.write(f"Center (fractional): [{center_coords[0]:.3f}, {center_coords[1]:.3f}, {center_coords[2]:.3f}]")
-        log_area.write(f"Bubble volume: {bubble_volume:.2f} Å³")
-        log_area.write(f"Inserting {n_atoms_to_insert} atoms → density: {resulting_density:.4f} atoms/Å³")
+        if not replace_in_place:
+            log_area.write(f"Bubble volume: {bubble_volume:.2f} Å³")
+            log_area.write(f"Inserting {n_atoms_to_insert} atoms → density: {resulting_density:.4f} atoms/Å³")
 
     new_structure = structure_obj.copy()
 
@@ -112,6 +118,8 @@ def create_compressed_bubble(structure_obj, bubble_radius, center_coords,
     lattice_matrix = new_structure.lattice.matrix
 
     indices_to_remove = []
+    positions_to_replace = []
+
     for i, site in enumerate(new_structure.sites):
         site_cart = site.coords
 
@@ -127,12 +135,34 @@ def create_compressed_bubble(structure_obj, bubble_radius, center_coords,
 
         if min_distance <= bubble_radius:
             indices_to_remove.append(i)
+            if replace_in_place:
+                positions_to_replace.append(site.frac_coords)
 
     if log_area:
         log_area.write(f"Removing {len(indices_to_remove)} atoms within radius {bubble_radius:.2f} Å")
 
     for idx in sorted(indices_to_remove, reverse=True):
         new_structure.remove_sites([idx])
+
+    if replace_in_place:
+        if log_area:
+            log_area.write(f"Replacing {len(positions_to_replace)} atoms at original positions with {element_symbols}")
+
+        for pos_frac in positions_to_replace:
+            element = Element(element_symbols[np.random.randint(0, len(element_symbols))])
+            new_structure.append(
+                species=element,
+                coords=pos_frac,
+                coords_are_cartesian=False,
+                validate_proximity=False
+            )
+
+        if log_area:
+            elements_used = ', '.join(set(element_symbols))
+            log_area.success(
+                f"Substitution sphere created: replaced {len(positions_to_replace)} atoms with {elements_used}")
+
+        return new_structure
 
     if n_atoms_to_insert == 0:
         if log_area:
@@ -193,6 +223,82 @@ def create_compressed_bubble(structure_obj, bubble_radius, center_coords,
 
     return new_structure
 
+
+def create_substitution_cluster_rectangular(structure, original_element, substitute_element,
+                                            num_to_substitute, block_dimensions, log_area=None,
+                                            random_seed=None, delete_non_clustered_original_elements=False):
+    if random_seed is not None:
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    struct_copy = structure.copy()
+
+    orig_indices = [i for i, site in enumerate(struct_copy.sites)
+                    if site.specie.symbol == original_element]
+
+    if not orig_indices:
+        if log_area:
+            log_area.warning(f"No atoms of element '{original_element}' found in structure.")
+        return struct_copy
+
+    if num_to_substitute > len(orig_indices):
+        if log_area:
+            log_area.warning(f"Requested {num_to_substitute} substitutions but only {len(orig_indices)} "
+                             f"atoms of '{original_element}' available. Using maximum available.")
+        num_to_substitute = len(orig_indices)
+
+    seed_idx = random.choice(orig_indices)
+    seed_cart_coords = struct_copy.sites[seed_idx].coords
+
+    if log_area:
+        log_area.info(f"Seed atom: {original_element} at index {seed_idx}")
+        log_area.info(f"Block center (Cartesian): {seed_cart_coords}")
+
+    block_x, block_y, block_z = block_dimensions
+    atoms_in_block = []
+
+    for idx in orig_indices:
+        site_coords = struct_copy.sites[idx].coords
+        rel_coords = site_coords - seed_cart_coords
+
+        if (abs(rel_coords[0]) <= block_x / 2 and
+                abs(rel_coords[1]) <= block_y / 2 and
+                abs(rel_coords[2]) <= block_z / 2):
+            distance_from_seed = np.linalg.norm(rel_coords)
+            atoms_in_block.append((idx, distance_from_seed))
+
+    if not atoms_in_block:
+        if log_area:
+            log_area.warning(f"No atoms of '{original_element}' found within the specified block.")
+        return struct_copy
+
+    atoms_in_block.sort(key=lambda x: x[1])
+    indices_to_substitute = [idx for idx, _ in atoms_in_block[:num_to_substitute]]
+
+    if log_area:
+        log_area.success(f"Found {len(atoms_in_block)} atoms within block, substituting {len(indices_to_substitute)}")
+        log_area.info(f"Block dimensions: {block_x:.1f} × {block_y:.1f} × {block_z:.1f} Å³")
+
+    substituted_indices = set(indices_to_substitute)
+
+    for idx in indices_to_substitute:
+        struct_copy.replace(idx, substitute_element)
+
+    if log_area:
+        log_area.success(f"Substituted {len(indices_to_substitute)} atoms: {original_element} → {substitute_element}")
+
+    if delete_non_clustered_original_elements:
+        indices_to_remove = [i for i in orig_indices if i not in substituted_indices]
+
+        if indices_to_remove:
+            indices_to_remove.sort(reverse=True)
+            for idx in indices_to_remove:
+                struct_copy.remove_sites([idx])
+
+            if log_area:
+                log_area.info(f"Deleted {len(indices_to_remove)} non-clustered '{original_element}' atoms")
+
+    return struct_copy
 
 def find_farthest_bubble_centers(structure_obj, bubble1_center_mode, bubble1_center_coords,
                                  bubble1_center_element, bubble1_radius, bubble2_radius,
