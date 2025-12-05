@@ -1,6 +1,7 @@
 # XRDlicious - point defects creation 
-[XRDlicious](http://xrdlicious.com/) submodule for creating random point defects (interstitials, substitutes, vacancies, clusters, bubbles) in crystal structures. Also allows to fix atoms in POSCAR for Selective dynamics within VASP. 
-🌐 Access the application here: [xrdlicious-point-defects.streamlit.app/](https://xrdlicious-point-defects.streamlit.app).  
+[XRDlicious](http://xrdlicious.com/) submodule for creating random point defects (interstitials, substitutes, vacancies, clusters, bubbles) in crystal structures. Also allows to fix atoms in POSCAR for Selective dynamics within VASP.  
+
+🌐 **Access the application here:** [xrdlicious-point-defects.streamlit.app/](https://xrdlicious-point-defects.streamlit.app).  
 - 🎥 Video tutorial at [YouTube](https://www.youtube.com/watch?v=cPp-NPxhAYQ&t=6s&ab_channel=Implantgroup) for creating point defects. 
 - 🎥 Video tutorial at [YouTube](https://www.youtube.com/watch?v=dvC8ohlW51k) for fixing atoms for Selective Dynamics in POSCAR within VASP .
 
