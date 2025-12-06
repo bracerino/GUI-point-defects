@@ -34,6 +34,8 @@ import io
 from pymatgen.core import Structure, Element
 from PIL import Image
 from pymatgen.transformations.standard_transformations import SupercellTransformation
+from create_selective_dynamics import render_selective_dynamics_ui
+
 
 MP_API_KEY = "UtfGa1BUI3RlWYVwfpMco2jVt8ApHOye"
 ELEMENTS = [
@@ -185,6 +187,20 @@ show_database_search = st.checkbox("Enable **database** search (MP, AFLOW, COD)"
                                    value=False,
                                    help="Enable to search in Materials Project, AFLOW, and COD databases")
 
+enable_selective_dynamics = st.checkbox(
+    "🔒 Enable Selective Dynamics Tool",
+    value=False,
+    help="Enable tool to fix atomic positions in POSCAR files"
+)
+
+if enable_selective_dynamics:
+    if 'full_structures' in st.session_state and st.session_state.full_structures:
+        render_selective_dynamics_ui(
+            structures_dict=st.session_state.full_structures,
+            selected_file=st.session_state.get('selected_file')
+        )
+    else:
+        st.warning("Upload structure files first to use the Selective Dynamics tool")
 
 def get_space_group_info(number):
     symbol = SPACE_GROUP_SYMBOLS.get(number, f"SG#{number}")
@@ -1652,7 +1668,8 @@ if st.session_state.uploaded_files:
                     st.warning(
                         f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}).")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
-                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster", "Swap Nearest Elements"]
+                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster",
+                                                 "Swap Nearest Elements","Create Compressed Bubble"]
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
                 operation_mode = st.selectbox("Choose Defect Operation", current_defect_op_options, key=op_mode_key)
@@ -1805,6 +1822,13 @@ if st.session_state.uploaded_files:
                     st.info(
                         "This mode replaces a specified number of atoms of one element with another, ensuring the substituted atoms are physically close to form a cluster.")
 
+                    cluster_shape = st.radio(
+                        "Cluster Shape",
+                        options=["Spherical", "Rectangular/Block"],
+                        key="cluster_shape",
+                        help="Choose the shape of the substitution cluster"
+                    )
+
                     cluster_c1, cluster_c2, cluster_c3, cluster_c4 = st.columns(4)
 
                     available_elements = sorted(
@@ -1843,17 +1867,57 @@ if st.session_state.uploaded_files:
                             help=f"Number of '{orig_element}' atoms to replace. Max: {max_atoms_for_cluster}"
                         )
 
-                    with cluster_c4:
-                        cluster_radius_input = st.number_input(
-                            "Cluster Radius (Å)",
-                            min_value=0.1,
-                            max_value=15.0,
-                            value=3.5,
-                            step=0.1,
-                            format="%.1f",
-                            key="cluster_radius_input",
-                            help="Max distance to search for neighbors to expand the cluster."
-                        )
+                    if cluster_shape == "Spherical":
+                        with cluster_c4:
+                            cluster_radius_input = st.number_input(
+                                "Cluster Radius (Å)",
+                                min_value=0.1,
+                                max_value=15.0,
+                                value=3.5,
+                                step=0.1,
+                                format="%.1f",
+                                key="cluster_radius_input",
+                                help="Max distance to search for neighbors to expand the cluster."
+                            )
+                        cluster_dimensions = None
+                    else:
+                        st.markdown("**Block Dimensions (Å):**")
+                        dim_col1, dim_col2, dim_col3 = st.columns(3)
+                        with dim_col1:
+                            block_x = st.number_input(
+                                "X dimension",
+                                min_value=0.5,
+                                max_value=20.0,
+                                value=5.0,
+                                step=0.5,
+                                format="%.1f",
+                                key="cluster_block_x",
+                                help="Block size along X axis"
+                            )
+                        with dim_col2:
+                            block_y = st.number_input(
+                                "Y dimension",
+                                min_value=0.5,
+                                max_value=20.0,
+                                value=5.0,
+                                step=0.5,
+                                format="%.1f",
+                                key="cluster_block_y",
+                                help="Block size along Y axis"
+                            )
+                        with dim_col3:
+                            block_z = st.number_input(
+                                "Z dimension",
+                                min_value=0.5,
+                                max_value=20.0,
+                                value=5.0,
+                                step=0.5,
+                                format="%.1f",
+                                key="cluster_block_z",
+                                help="Block size along Z axis"
+                            )
+                        cluster_dimensions = (block_x, block_y, block_z)
+                        cluster_radius_input = None
 
                     delete_others = st.checkbox(
                         "🗑️ Delete other original elements (outside cluster)",
@@ -1863,8 +1927,13 @@ if st.session_state.uploaded_files:
                     )
 
                     st.markdown("**Preview of Cluster to be Created:**")
-                    st.write(
-                        f"• Will replace **{num_to_substitute}** atoms of **{orig_element}** with **{sub_element}** within a radius of **{cluster_radius_input} Å**.")
+                    if cluster_shape == "Spherical":
+                        st.write(
+                            f"• Will replace **{num_to_substitute}** atoms of **{orig_element}** with **{sub_element}** within a spherical radius of **{cluster_radius_input} Å**.")
+                    else:
+                        st.write(
+                            f"• Will replace **{num_to_substitute}** atoms of **{orig_element}** with **{sub_element}** within a rectangular block of **{block_x}×{block_y}×{block_z} Å³**.")
+
                     if delete_others:
                         st.info(f"• All other non-clustered **{orig_element}** atoms will be deleted.")
 
@@ -1963,7 +2032,235 @@ if st.session_state.uploaded_files:
                             st.info("No vacancies will be created with current settings.")
                     else:
                         st.warning("No elements for vacancies.")
-                elif operation_mode == "Swap Nearest Elements":  # NEW BLOCK STARTS HERE
+
+                elif operation_mode == "Create Compressed Bubble":
+                    st.markdown("**Create Compressed Bubble Settings**")
+                    st.info(
+                        "Creates a spherical void by removing atoms, then fills it with a specified number of atoms. "
+                        "Useful for simulating gas-filled voids, precipitates, or compressed phases.")
+
+                    enable_second_bubble = st.checkbox(
+                        "Enable Second Bubble",
+                        value=False,
+                        key="enable_second_bubble",
+                        help="Create two bubbles with centers placed as far apart as possible"
+                    )
+
+                    st.markdown("**First Bubble:**")
+                    bubble_c1, bubble_c2, bubble_c3 = st.columns(3)
+
+                    with bubble_c1:
+                        bubble_radius = st.number_input(
+                            "Bubble Radius (Å)",
+                            min_value=1.0,
+                            max_value=20.0,
+                            value=4.0,
+                            step=0.5,
+                            format="%.1f",
+                            key="bubble_radius",
+                            help="Radius of the spherical bubble region"
+                        )
+
+                    with bubble_c2:
+                        bubble_n_atoms = st.number_input(
+                            "Number of Atoms",
+                            min_value=1,
+                            max_value=10000,
+                            value=50,
+                            step=1,
+                            key="bubble_n_atoms",
+                            help="Number of atoms to place inside the bubble"
+                        )
+
+                    with bubble_c3:
+                        bubble_min_dist = st.number_input(
+                            "Min Interatomic Dist. (Å)",
+                            min_value=0.5,
+                            max_value=5.0,
+                            value=1.5,
+                            step=0.1,
+                            format="%.1f",
+                            key="bubble_min_dist",
+                            help="Minimum distance between atoms inside bubble"
+                        )
+
+                    st.markdown("**Bubble Center Location:**")
+                    center_mode_col1, center_mode_col2 = st.columns(2)
+
+                    with center_mode_col1:
+                        center_selection_mode = st.selectbox(
+                            "Center Selection Method",
+                            ["Random", "Manual Coordinates", "Near Element"],
+                            key="bubble_center_mode",
+                            help="Choose how to determine the first bubble center"
+                        )
+
+                    bubble_center_coords = None
+
+                    if center_selection_mode == "Manual Coordinates":
+                        st.markdown("**Fractional Coordinates (0-1):**")
+                        coord_cols = st.columns(3)
+                        with coord_cols[0]:
+                            center_x = st.number_input("x", 0.0, 1.0, 0.5, 0.01, format="%.3f", key="bubble_x")
+                        with coord_cols[1]:
+                            center_y = st.number_input("y", 0.0, 1.0, 0.5, 0.01, format="%.3f", key="bubble_y")
+                        with coord_cols[2]:
+                            center_z = st.number_input("z", 0.0, 1.0, 0.5, 0.01, format="%.3f", key="bubble_z")
+                        bubble_center_coords = np.array([center_x, center_y, center_z])
+
+                    elif center_selection_mode == "Near Element":
+                        available_elements = sorted(
+                            list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+                        with center_mode_col2:
+                            center_near_element = st.selectbox(
+                                "Place near:",
+                                options=available_elements,
+                                key="bubble_near_element",
+                                help="Bubble will be centered near a random atom of this element"
+                            )
+
+                    st.markdown("**Elements to Fill Bubble:**")
+                    bubble_elements = st.multiselect(
+                        "Select Element(s)",
+                        options=ELEMENTS,
+                        default=["He"],
+                        key="bubble_fill_elements",
+                        help="Elements to place inside the bubble (will be distributed evenly if multiple)"
+                    )
+
+                    bubble2_radius = None
+                    bubble2_n_atoms = None
+                    bubble2_elements = None
+
+                    if enable_second_bubble:
+                        st.markdown("---")
+                        st.markdown("**Second Bubble:**")
+
+                        bubble2_c1, bubble2_c2, bubble2_c3 = st.columns(3)
+
+                        with bubble2_c1:
+                            bubble2_radius = st.number_input(
+                                "Bubble 2 Radius (Å)",
+                                min_value=1.0,
+                                max_value=20.0,
+                                value=3.0,
+                                step=0.5,
+                                format="%.1f",
+                                key="bubble2_radius",
+                                help="Radius of the second bubble"
+                            )
+
+                        with bubble2_c2:
+                            bubble2_n_atoms = st.number_input(
+                                "Bubble 2 Atoms",
+                                min_value=1,
+                                max_value=10000,
+                                value=30,
+                                step=1,
+                                key="bubble2_n_atoms",
+                                help="Number of atoms in second bubble"
+                            )
+
+                        with bubble2_c3:
+                            st.info("Uses same min distance")
+
+                        st.markdown("**Elements for Second Bubble:**")
+                        bubble2_elements = st.multiselect(
+                            "Select Element(s) for Bubble 2",
+                            options=ELEMENTS,
+                            default=["He"],
+                            key="bubble2_fill_elements",
+                            help="Elements for second bubble"
+                        )
+
+                        st.info(
+                            "ℹ️ Second bubble center will be automatically placed as far as possible from the first bubble")
+
+                    bubble_volume = (4.0 / 3.0) * np.pi * (bubble_radius ** 3)
+                    resulting_density = bubble_n_atoms / bubble_volume if bubble_volume > 0 else 0
+
+                    typical_solid_density = 0.08
+                    estimated_atoms_removed = int(bubble_volume * typical_solid_density)
+
+                    st.markdown("**Density Reference:**")
+                    density_info_cols = st.columns(3)
+                    with density_info_cols[0]:
+                        st.caption("**Gases:** 0.0005-0.01 atoms/Å³")
+                    with density_info_cols[1]:
+                        st.caption("**Liquids:** 0.03-0.08 atoms/Å³")
+                    with density_info_cols[2]:
+                        st.caption("**Solids:** 0.05-0.15 atoms/Å³")
+
+                    st.markdown("**Preview - First Bubble:**")
+
+                    if resulting_density < 0.01:
+                        bubble_type = "Low-density gas"
+                        density_color = "blue"
+                    elif resulting_density < 0.03:
+                        bubble_type = "High-density gas / vapor"
+                        density_color = "blue"
+                    elif resulting_density < 0.08:
+                        bubble_type = "Liquid-like"
+                        density_color = "orange"
+                    else:
+                        bubble_type = "Solid-like / highly compressed"
+                        density_color = "red"
+
+                    preview_text = f"""
+                    • **Bubble volume:** {bubble_volume:.1f} Å³  
+                    • **Atoms to remove:** ~{estimated_atoms_removed} (estimate from host)  
+                    • **Atoms to insert:** {bubble_n_atoms}  
+                    • **Resulting density:** {resulting_density:.4f} atoms/Å³  
+                    • **Classification:** :{density_color}[{bubble_type}]  
+                    • **Elements:** {', '.join(bubble_elements) if bubble_elements else 'None selected'}
+                    """
+
+                    st.info(preview_text)
+
+                    max_reasonable_density = bubble_n_atoms / ((4.0 / 3.0) * np.pi * (bubble_min_dist / 2.0) ** 3)
+                    if resulting_density > max_reasonable_density:
+                        st.warning(
+                            f"⚠️ Warning: Requested density may be too high. With min distance {bubble_min_dist:.1f} Å, "
+                            f"maximum achievable density is ~{max_reasonable_density:.4f} atoms/Å³. "
+                            f"Consider reducing number of atoms or increasing bubble radius.")
+
+                    if enable_second_bubble and bubble2_radius and bubble2_n_atoms:
+                        st.markdown("**Preview - Second Bubble:**")
+
+                        bubble2_volume = (4.0 / 3.0) * np.pi * (bubble2_radius ** 3)
+                        resulting_density2 = bubble2_n_atoms / bubble2_volume if bubble2_volume > 0 else 0
+                        estimated_atoms_removed2 = int(bubble2_volume * typical_solid_density)
+
+                        if resulting_density2 < 0.01:
+                            bubble_type2 = "Low-density gas"
+                            density_color2 = "blue"
+                        elif resulting_density2 < 0.03:
+                            bubble_type2 = "High-density gas / vapor"
+                            density_color2 = "blue"
+                        elif resulting_density2 < 0.08:
+                            bubble_type2 = "Liquid-like"
+                            density_color2 = "orange"
+                        else:
+                            bubble_type2 = "Solid-like / highly compressed"
+                            density_color2 = "red"
+
+                        preview_text2 = f"""
+                        • **Bubble volume:** {bubble2_volume:.1f} Å³  
+                        • **Atoms to remove:** ~{estimated_atoms_removed2} (estimate)  
+                        • **Atoms to insert:** {bubble2_n_atoms}  
+                        • **Resulting density:** {resulting_density2:.4f} atoms/Å³  
+                        • **Classification:** :{density_color2}[{bubble_type2}]  
+                        • **Elements:** {', '.join(bubble2_elements) if bubble2_elements else 'None selected'}
+                        """
+
+                        st.info(preview_text2)
+
+                        st.markdown("**Total Preview:**")
+                        total_atoms_removed = estimated_atoms_removed + estimated_atoms_removed2
+                        total_atoms_inserted = bubble_n_atoms + bubble2_n_atoms
+                        st.success(
+                            f"Total: ~{total_atoms_removed} atoms removed, {total_atoms_inserted} atoms inserted")
+                elif operation_mode == "Swap Nearest Elements":
                     st.markdown("**Swap Nearest Elements Settings**")
                     st.info(
                         "This operation identifies atoms of the 'Interstitial Element' and their nearest neighbors of the 'Target Element', then swaps their identities. Useful for studying antisite defects or interstitial migration."
@@ -2215,87 +2512,541 @@ if st.session_state.uploaded_files:
 
                     with batch_col1:
                         st.markdown("##### Generate Multiple Configurations")
-                        n_configurations = st.number_input("Number of configurations", 1, 500, 10, 1, key="n_configs")
+
+                        if operation_mode in ["Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]:
+                            use_range_mode = st.checkbox(
+                                "Generate range of defect counts",
+                                value=False,
+                                key="use_range_mode",
+                                help="Generate structures with different numbers of defects"
+                            )
+
+                            if use_range_mode:
+                                if operation_mode == "Create Substitution Cluster":
+                                    st.markdown("**Substitution Range:**")
+
+                                    max_available = max_atoms_for_cluster if 'max_atoms_for_cluster' in locals() else 100
+
+                                    min_substitutions = st.number_input(
+                                        "Min substitutions",
+                                        min_value=1,
+                                        max_value=max_available,
+                                        value=1,
+                                        step=1,
+                                        key="min_subs"
+                                    )
+
+                                    max_substitutions = st.number_input(
+                                        "Max substitutions",
+                                        min_value=min_substitutions,
+                                        max_value=max_available,
+                                        value=max(min_substitutions, min(10, max_available)),
+                                        step=1,
+                                        key="max_subs"
+                                    )
+
+                                    step_substitutions = st.number_input(
+                                        "Step size",
+                                        min_value=1,
+                                        max_value=max(1, max_substitutions - min_substitutions),
+                                        value=min(1, max(1, max_substitutions - min_substitutions)),
+                                        step=1,
+                                        key="step_subs"
+                                    )
+
+                                    defect_range = list(
+                                        range(min_substitutions, max_substitutions + 1, step_substitutions))
+                                    range_label = "substitutions"
+                                    range_mode = "count"
+
+                                elif operation_mode == "Substitute Atoms":
+                                    st.markdown("**Substitution Range:**")
+
+                                    selected_sub_element = None
+                                    for el_s in sub_settings.keys():
+                                        if sub_settings[el_s].get("percentage", 0) > 0:
+                                            selected_sub_element = el_s
+                                            break
+
+                                    if not selected_sub_element:
+                                        st.warning("Please configure substitution settings first (set percentage > 0)")
+                                        use_range_mode = False
+                                    else:
+                                        range_mode = st.radio(
+                                            "Range mode",
+                                            options=["Percentage", "Number of atoms"],
+                                            key="sub_range_mode",
+                                            horizontal=True
+                                        )
+
+                                        if range_mode == "Percentage":
+                                            min_value = st.number_input(
+                                                "Min %",
+                                                min_value=0.01,
+                                                max_value=100.0,
+                                                value=1.0,
+                                                step=0.5,
+                                                key="min_sub_perc"
+                                            )
+
+                                            max_value = st.number_input(
+                                                "Max %",
+                                                min_value=min_value,
+                                                max_value=100.0,
+                                                value=max(min_value, 10.0),
+                                                step=0.5,
+                                                key="max_sub_perc"
+                                            )
+
+                                            step_value = st.number_input(
+                                                "Step %",
+                                                min_value=0.01,
+                                                max_value=max(0.01, max_value - min_value),
+                                                value=min(1.0, max(0.01, max_value - min_value)),
+                                                step=0.1,
+                                                key="step_sub_perc"
+                                            )
+
+                                            defect_range = [round(x, 2) for x in
+                                                            np.arange(min_value, max_value + step_value / 2,
+                                                                      step_value)]
+                                            range_label = "percent"
+                                            range_mode = "percentage"
+                                        else:
+                                            element_count = sum(1 for site in active_pmg_for_defects.sites if
+                                                                site.specie.symbol == selected_sub_element)
+
+                                            min_atoms = st.number_input(
+                                                "Min atoms",
+                                                min_value=1,
+                                                max_value=element_count,
+                                                value=1,
+                                                step=1,
+                                                key="min_sub_atoms"
+                                            )
+
+                                            max_atoms = st.number_input(
+                                                "Max atoms",
+                                                min_value=min_atoms,
+                                                max_value=element_count,
+                                                value=max(min_atoms, min(10, element_count)),
+                                                step=1,
+                                                key="max_sub_atoms"
+                                            )
+
+                                            step_atoms = st.number_input(
+                                                "Step",
+                                                min_value=1,
+                                                max_value=max(1, max_atoms - min_atoms),
+                                                value=min(1, max(1, max_atoms - min_atoms)),
+                                                step=1,
+                                                key="step_sub_atoms"
+                                            )
+
+                                            defect_range = list(range(min_atoms, max_atoms + 1, step_atoms))
+                                            range_label = "atoms"
+                                            range_mode = "count"
+
+                                        st.info(
+                                            f"Will vary substitution of **{selected_sub_element}** → **{sub_settings[selected_sub_element]['substitute']}**")
+
+                                elif operation_mode == "Create Vacancies":
+                                    st.markdown("**Vacancy Range:**")
+
+                                    selected_vac_element = None
+                                    for el_v in vac_percent.keys():
+                                        if vac_percent[el_v] > 0:
+                                            selected_vac_element = el_v
+                                            break
+
+                                    if not selected_vac_element:
+                                        st.warning("Please configure vacancy settings first (set percentage > 0)")
+                                        use_range_mode = False
+                                    else:
+                                        range_mode = st.radio(
+                                            "Range mode",
+                                            options=["Percentage", "Number of atoms"],
+                                            key="vac_range_mode",
+                                            horizontal=True
+                                        )
+
+                                        if range_mode == "Percentage":
+                                            min_value = st.number_input(
+                                                "Min %",
+                                                min_value=0.01,
+                                                max_value=100.0,
+                                                value=1.0,
+                                                step=0.5,
+                                                key="min_vac_perc"
+                                            )
+
+                                            max_value = st.number_input(
+                                                "Max %",
+                                                min_value=min_value,
+                                                max_value=100.0,
+                                                value=max(min_value, 10.0),
+                                                step=0.5,
+                                                key="max_vac_perc"
+                                            )
+
+                                            step_value = st.number_input(
+                                                "Step %",
+                                                min_value=0.01,
+                                                max_value=max(0.01, max_value - min_value),
+                                                value=min(1.0, max(0.01, max_value - min_value)),
+                                                step=0.1,
+                                                key="step_vac_perc"
+                                            )
+
+                                            defect_range = [round(x, 2) for x in
+                                                            np.arange(min_value, max_value + step_value / 2,
+                                                                      step_value)]
+                                            range_label = "percent"
+                                            range_mode = "percentage"
+                                        else:
+                                            element_count = sum(1 for site in active_pmg_for_defects.sites if
+                                                                site.specie.symbol == selected_vac_element)
+
+                                            min_atoms = st.number_input(
+                                                "Min atoms",
+                                                min_value=1,
+                                                max_value=element_count,
+                                                value=1,
+                                                step=1,
+                                                key="min_vac_atoms"
+                                            )
+
+                                            max_atoms = st.number_input(
+                                                "Max atoms",
+                                                min_value=min_atoms,
+                                                max_value=element_count,
+                                                value=max(min_atoms, min(10, element_count)),
+                                                step=1,
+                                                key="max_vac_atoms"
+                                            )
+
+                                            step_atoms = st.number_input(
+                                                "Step",
+                                                min_value=1,
+                                                max_value=max(1, max_atoms - min_atoms),
+                                                value=min(1, max(1, max_atoms - min_atoms)),
+                                                step=1,
+                                                key="step_vac_atoms"
+                                            )
+
+                                            defect_range = list(range(min_atoms, max_atoms + 1, step_atoms))
+                                            range_label = "atoms"
+                                            range_mode = "count"
+
+                                        st.info(f"Will vary vacancies of **{selected_vac_element}**")
+
+                                if use_range_mode and 'defect_range' in locals():
+                                    configs_per_count = st.number_input(
+                                        "Configurations per value",
+                                        min_value=1,
+                                        max_value=1000,
+                                        value=10,
+                                        step=1,
+                                        key="configs_per_count",
+                                        help="How many structures to generate for each defect count"
+                                    )
+
+                                    total_configs = len(defect_range) * configs_per_count
+                                    st.info(
+                                        f"Will generate: {defect_range} ({len(defect_range)} values × {configs_per_count} configs = {total_configs} total)")
+                            else:
+                                n_configurations = st.number_input("Number of configurations", 1, 500, 10, 1,
+                                                                   key="n_configs")
+                        else:
+                            n_configurations = st.number_input("Number of configurations", 1, 500, 10, 1,
+                                                               key="n_configs")
+
                         starting_seed = st.number_input("Starting random seed", 0, 9999, 42, 1, key="start_seed")
 
-                        if st.button("🎲 Generate Multiple Defect Configurations", key="generate_batch_btn", type = 'primary'):
+                        if st.button("🎲 Generate Multiple Defect Configurations", key="generate_batch_btn",
+                                     type='primary'):
                             if st.session_state.current_structure_before_defects:
-                                with st.spinner(f"Generating {n_configurations} configurations..."):
-                                    st.session_state.generated_structures = {}
 
-                                    for i in range(n_configurations):
-                                        seed = starting_seed + i
-                                        config_name = f"config_{i + 1:02d}_seed{seed}"
+                                if st.session_state.get('use_range_mode', False) and operation_mode in [
+                                    "Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]:
+                                    total_configs = len(defect_range) * configs_per_count
+                                    with st.spinner(f"Generating {total_configs} configurations..."):
+                                        st.session_state.generated_structures = {}
+                                        config_counter = 0
 
-                                        base_struct = st.session_state.current_structure_before_defects.copy()
+                                        for defect_value in defect_range:
+                                            for rep in range(configs_per_count):
+                                                seed = starting_seed + config_counter
 
-                                        if operation_mode == "Insert Interstitials (Fast Grid method)":
-                                            modified_struct = insert_interstitials_ase_fast(
-                                                base_struct, int_el_fast, int_n_fast, int_min_dist_fast,
-                                                int_grid_spacing, int_mode_fast, int_min_int_dist, None, seed
-                                            )
-                                        elif operation_mode == "Insert Interstitials (Voronoi method)":
-                                            modified_struct = insert_interstitials_into_structure(
-                                                base_struct, int_el, int_n, int_type_idx, int_mode,
-                                                int_clust, int_min_dist, int_target, None, seed
-                                            )
-                                        elif operation_mode == "Create Vacancies":
-                                            modified_struct = remove_vacancies_from_structure(
-                                                base_struct, vac_percent, vac_mode, vac_target, None, seed
-                                            )
-                                        elif operation_mode == "Substitute Atoms":
-                                            modified_struct = substitute_atoms_in_structure(
-                                                base_struct, sub_settings, sub_mode, sub_target, None, seed
-                                            )
-                                        elif operation_mode == "Apply Atomic Displacements":
-                                            modified_struct = apply_atomic_displacements(
-                                                base_struct,
-                                                displacement_mode,
-                                                max_displacement if displacement_mode == "uniform" else None,
-                                                std_displacement if displacement_mode == "gaussian" else None,
-                                                coordinate_system,
-                                                selected_disp_elements if not apply_to_all else None,
-                                                None,  # log_area
-                                                seed)
-                                        if operation_mode == "Swap Nearest Elements":
-                                            el1_batch = st.session_state.get('swap_int_el')
-                                            el2_batch = st.session_state.get('swap_target_el')
-                                            n_swaps_batch = st.session_state.get('swap_num_swaps')
-                                            max_dist_batch = st.session_state.get('swap_max_dist')
-                                            if not all([el1_batch, el2_batch, n_swaps_batch is not None,
-                                                        max_dist_batch is not None]):
-                                                st.error(
-                                                    "Cannot generate batch: Swap parameters are missing. Please configure them in the UI.")
-                                                break
-                                        elif operation_mode == "Create Substitution Cluster":
-                                            orig_el = st.session_state.get('cluster_orig_el')
-                                            sub_el = st.session_state.get('cluster_sub_el')
-                                            num_sub = st.session_state.get('cluster_num_atoms')
-                                            radius = st.session_state.get('cluster_radius_input')
-                                            del_others = st.session_state.get('delete_other_orig_el_cluster', False)
+                                                if operation_mode == "Create Substitution Cluster":
+                                                    config_name = f"{int(defect_value)}subs/config_{int(defect_value)}subs_rep{rep + 1:02d}_seed{seed}"
+                                                    num_subs = int(defect_value)
 
+                                                    base_struct = st.session_state.current_structure_before_defects.copy()
+                                                    orig_el = st.session_state.get('cluster_orig_el')
+                                                    sub_el = st.session_state.get('cluster_sub_el')
+                                                    del_others = st.session_state.get('delete_other_orig_el_cluster',
+                                                                                      False)
+                                                    cluster_shape = st.session_state.get('cluster_shape', 'Spherical')
 
-                                            if all([orig_el, sub_el, num_sub, radius is not None]):
-                                                modified_struct = create_substitution_cluster(
-                                                    base_struct,
-                                                    orig_el,
-                                                    sub_el,
-                                                    num_sub,
-                                                    radius,
-                                                    None,
-                                                    seed,
-                                                    delete_non_clustered_original_elements=del_others
+                                                    if cluster_shape == "Spherical":
+                                                        radius = st.session_state.get('cluster_radius_input')
+                                                        if all([orig_el, sub_el, radius is not None]):
+                                                            modified_struct = create_substitution_cluster(
+                                                                base_struct, orig_el, sub_el, num_subs, radius, None,
+                                                                seed,
+                                                                delete_non_clustered_original_elements=del_others
+                                                            )
+                                                        else:
+                                                            modified_struct = base_struct
+                                                    else:
+                                                        block_x = st.session_state.get('cluster_block_x')
+                                                        block_y = st.session_state.get('cluster_block_y')
+                                                        block_z = st.session_state.get('cluster_block_z')
+
+                                                        if all([orig_el, sub_el, block_x, block_y, block_z]):
+                                                            modified_struct = create_substitution_cluster_rectangular(
+                                                                base_struct, orig_el, sub_el, num_subs,
+                                                                (block_x, block_y, block_z), None, seed,
+                                                                delete_non_clustered_original_elements=del_others
+                                                            )
+                                                        else:
+                                                            modified_struct = base_struct
+
+                                                elif operation_mode == "Substitute Atoms":
+                                                    base_struct = st.session_state.current_structure_before_defects.copy()
+
+                                                    if range_mode == "count":
+                                                        config_name = f"{int(defect_value)}atoms/config_{int(defect_value)}atoms_rep{rep + 1:02d}_seed{seed}"
+
+                                                        element_count = sum(1 for site in base_struct.sites if
+                                                                            site.specie.symbol == selected_sub_element)
+                                                        percentage_value = (
+                                                                                       defect_value / element_count) * 100 if element_count > 0 else 0
+
+                                                        modified_sub_settings = {}
+                                                        for el_s in sub_settings.keys():
+                                                            modified_sub_settings[el_s] = {
+                                                                "percentage": percentage_value if sub_settings[
+                                                                                                      el_s].get(
+                                                                    "percentage", 0) > 0 else 0,
+                                                                "substitute": sub_settings[el_s].get("substitute", "")
+                                                            }
+                                                    else:
+                                                        config_name = f"{defect_value:.2f}perc/config_{defect_value:.2f}perc_rep{rep + 1:02d}_seed{seed}"
+
+                                                        modified_sub_settings = {}
+                                                        for el_s in sub_settings.keys():
+                                                            modified_sub_settings[el_s] = {
+                                                                "percentage": defect_value if sub_settings[el_s].get(
+                                                                    "percentage", 0) > 0 else 0,
+                                                                "substitute": sub_settings[el_s].get("substitute", "")
+                                                            }
+
+                                                    modified_struct = substitute_atoms_in_structure(
+                                                        base_struct, modified_sub_settings, sub_mode, sub_target, None,
+                                                        seed
+                                                    )
+
+                                                elif operation_mode == "Create Vacancies":
+                                                    base_struct = st.session_state.current_structure_before_defects.copy()
+
+                                                    if range_mode == "count":
+                                                        config_name = f"{int(defect_value)}atoms/config_{int(defect_value)}atoms_rep{rep + 1:02d}_seed{seed}"
+
+                                                        element_count = sum(1 for site in base_struct.sites if
+                                                                            site.specie.symbol == selected_vac_element)
+                                                        percentage_value = (
+                                                                                       defect_value / element_count) * 100 if element_count > 0 else 0
+
+                                                        modified_vac_percent = {}
+                                                        for el_v in vac_percent.keys():
+                                                            modified_vac_percent[el_v] = percentage_value if \
+                                                            vac_percent[el_v] > 0 else 0
+                                                    else:
+                                                        config_name = f"{defect_value:.2f}perc/config_{defect_value:.2f}perc_rep{rep + 1:02d}_seed{seed}"
+
+                                                        modified_vac_percent = {}
+                                                        for el_v in vac_percent.keys():
+                                                            modified_vac_percent[el_v] = defect_value if vac_percent[
+                                                                                                             el_v] > 0 else 0
+
+                                                    modified_struct = remove_vacancies_from_structure(
+                                                        base_struct, modified_vac_percent, vac_mode, vac_target, None,
+                                                        seed
+                                                    )
+
+                                                st.session_state.generated_structures[config_name] = modified_struct
+                                                config_counter += 1
+
+                                        st.success(
+                                            f"Generated {len(st.session_state.generated_structures)} configurations with varying defect counts!")
+                                else:
+                                    with st.spinner(f"Generating {n_configurations} configurations..."):
+                                        st.session_state.generated_structures = {}
+
+                                        for i in range(n_configurations):
+                                            seed = starting_seed + i
+                                            config_name = f"config_{i + 1:02d}_seed{seed}"
+
+                                            base_struct = st.session_state.current_structure_before_defects.copy()
+
+                                            if operation_mode == "Insert Interstitials (Fast Grid method)":
+                                                modified_struct = insert_interstitials_ase_fast(
+                                                    base_struct, int_el_fast, int_n_fast, int_min_dist_fast,
+                                                    int_grid_spacing, int_mode_fast, int_min_int_dist, None, seed
                                                 )
-                                            else:
-                                                st.warning(
-                                                    f"Skipping config {i + 1}: Cluster parameters not found in session state.")
-                                                modified_struct = base_struct
+                                            elif operation_mode == "Create Compressed Bubble":
+                                                bubble_radius_batch = st.session_state.get('bubble_radius')
+                                                bubble_n_atoms_batch = st.session_state.get('bubble_n_atoms')
+                                                bubble_min_dist_batch = st.session_state.get('bubble_min_dist')
+                                                bubble_elements_batch = st.session_state.get('bubble_fill_elements')
+                                                enable_second_batch = st.session_state.get('enable_second_bubble',
+                                                                                           False)
 
+                                                bubble2_radius_batch = st.session_state.get('bubble2_radius')
+                                                bubble2_n_atoms_batch = st.session_state.get('bubble2_n_atoms')
+                                                bubble2_elements_batch = st.session_state.get('bubble2_fill_elements')
 
-                                        st.session_state.generated_structures[config_name] = modified_struct
+                                                if not enable_second_batch:
+                                                    bubble_center_coords = np.random.rand(3)
 
-                                    st.success(
-                                        f"Generated {len(st.session_state.generated_structures)} configurations!")
+                                                    if all([bubble_radius_batch, bubble_n_atoms_batch,
+                                                            bubble_elements_batch]):
+                                                        modified_struct = create_compressed_bubble(
+                                                            base_struct,
+                                                            bubble_radius_batch,
+                                                            bubble_center_coords,
+                                                            bubble_elements_batch,
+                                                            bubble_n_atoms_batch,
+                                                            bubble_min_dist_batch,
+                                                            None,
+                                                            seed
+                                                        )
+                                                    else:
+                                                        st.warning(
+                                                            f"Skipping config {i + 1}: Bubble parameters not found")
+                                                        modified_struct = base_struct
+                                                else:
+                                                    center1_frac, center2_frac, _ = find_farthest_bubble_centers(
+                                                        base_struct,
+                                                        "Random",
+                                                        None,
+                                                        None,
+                                                        bubble_radius_batch,
+                                                        bubble2_radius_batch,
+                                                        seed
+                                                    )
+
+                                                    modified_struct = base_struct.copy()
+
+                                                    if all([bubble_radius_batch, bubble_n_atoms_batch,
+                                                            bubble_elements_batch]):
+                                                        modified_struct = create_compressed_bubble(
+                                                            modified_struct,
+                                                            bubble_radius_batch,
+                                                            center1_frac,
+                                                            bubble_elements_batch,
+                                                            bubble_n_atoms_batch,
+                                                            bubble_min_dist_batch,
+                                                            None,
+                                                            seed
+                                                        )
+
+                                                    if all([bubble2_radius_batch, bubble2_n_atoms_batch,
+                                                            bubble2_elements_batch]):
+                                                        modified_struct = create_compressed_bubble(
+                                                            modified_struct,
+                                                            bubble2_radius_batch,
+                                                            center2_frac,
+                                                            bubble2_elements_batch,
+                                                            bubble2_n_atoms_batch,
+                                                            bubble_min_dist_batch,
+                                                            None,
+                                                            seed
+                                                        )
+                                            elif operation_mode == "Insert Interstitials (Voronoi method)":
+                                                modified_struct = insert_interstitials_into_structure(
+                                                    base_struct, int_el, int_n, int_type_idx, int_mode,
+                                                    int_clust, int_min_dist, int_target, None, seed
+                                                )
+                                            elif operation_mode == "Create Vacancies":
+                                                modified_struct = remove_vacancies_from_structure(
+                                                    base_struct, vac_percent, vac_mode, vac_target, None, seed
+                                                )
+                                            elif operation_mode == "Substitute Atoms":
+                                                modified_struct = substitute_atoms_in_structure(
+                                                    base_struct, sub_settings, sub_mode, sub_target, None, seed
+                                                )
+                                            elif operation_mode == "Apply Atomic Displacements":
+                                                modified_struct = apply_atomic_displacements(
+                                                    base_struct,
+                                                    displacement_mode,
+                                                    max_displacement if displacement_mode == "uniform" else None,
+                                                    std_displacement if displacement_mode == "gaussian" else None,
+                                                    coordinate_system,
+                                                    selected_disp_elements if not apply_to_all else None,
+                                                    None,
+                                                    seed)
+                                            elif operation_mode == "Swap Nearest Elements":
+                                                el1_batch = st.session_state.get('swap_int_el')
+                                                el2_batch = st.session_state.get('swap_target_el')
+                                                n_swaps_batch = st.session_state.get('swap_num_swaps')
+                                                max_dist_batch = st.session_state.get('swap_max_dist')
+                                                if not all([el1_batch, el2_batch, n_swaps_batch is not None,
+                                                            max_dist_batch is not None]):
+                                                    st.error(
+                                                        "Cannot generate batch: Swap parameters are missing. Please configure them in the UI.")
+                                                    break
+                                            elif operation_mode == "Create Substitution Cluster":
+                                                orig_el = st.session_state.get('cluster_orig_el')
+                                                sub_el = st.session_state.get('cluster_sub_el')
+                                                num_sub = st.session_state.get('cluster_num_atoms')
+                                                del_others = st.session_state.get('delete_other_orig_el_cluster', False)
+                                                cluster_shape = st.session_state.get('cluster_shape', 'Spherical')
+
+                                                if cluster_shape == "Spherical":
+                                                    radius = st.session_state.get('cluster_radius_input')
+                                                    if all([orig_el, sub_el, num_sub, radius is not None]):
+                                                        modified_struct = create_substitution_cluster(
+                                                            base_struct,
+                                                            orig_el,
+                                                            sub_el,
+                                                            num_sub,
+                                                            radius,
+                                                            None,
+                                                            seed,
+                                                            delete_non_clustered_original_elements=del_others
+                                                        )
+                                                    else:
+                                                        st.warning(
+                                                            f"Skipping config {i + 1}: Cluster parameters not found in session state.")
+                                                        modified_struct = base_struct
+                                                else:
+                                                    block_x = st.session_state.get('cluster_block_x')
+                                                    block_y = st.session_state.get('cluster_block_y')
+                                                    block_z = st.session_state.get('cluster_block_z')
+
+                                                    if all([orig_el, sub_el, num_sub, block_x, block_y, block_z]):
+                                                        modified_struct = create_substitution_cluster_rectangular(
+                                                            base_struct,
+                                                            orig_el,
+                                                            sub_el,
+                                                            num_sub,
+                                                            (block_x, block_y, block_z),
+                                                            None,
+                                                            seed,
+                                                            delete_non_clustered_original_elements=del_others
+                                                        )
+                                                    else:
+                                                        st.warning(
+                                                            f"Skipping config {i + 1}: Block parameters not found in session state.")
+                                                        modified_struct = base_struct
+
+                                            st.session_state.generated_structures[config_name] = modified_struct
+
+                                        st.success(
+                                            f"Generated {len(st.session_state.generated_structures)} configurations!")
                             else:
                                 st.error("No supercell structure available. Apply supercell first.")
 
@@ -2324,7 +3075,7 @@ if st.session_state.uploaded_files:
                                 batch_masses = st.checkbox("Include masses", True, key="batch_masses")
                                 batch_skew = st.checkbox("Force skew", False, key="batch_skew")
 
-                            if st.button("📦 Download All Configurations", key="download_batch_btn", type = 'primary'):
+                            if st.button("📦 Download All Configurations", key="download_batch_btn", type='primary'):
                                 import zipfile
                                 from io import BytesIO
 
@@ -2390,7 +3141,7 @@ if st.session_state.uploaded_files:
 
                                 base_name = st.session_state.selected_file.split('.')[
                                     0] if st.session_state.selected_file else "defects"
-                                zip_filename = f"{base_name}_{operation_mode.replace(' ', '_')}_{n_configurations}configs.zip"
+                                zip_filename = f"{base_name}_{operation_mode.replace(' ', '_')}_{len(st.session_state.generated_structures)}configs.zip"
 
                                 st.download_button(
                                     label="💾 Download ZIP Archive",
@@ -2488,6 +3239,7 @@ if st.session_state.uploaded_files:
                 elif not st.session_state.enable_batch_generation and st.button("Apply Selected Defect Operation", key="apply_defect_op_btn", type = 'primary'):
                     mod_struct = active_pmg_for_defects.copy()
                     changed = False
+                    random_seed = None
                     with col_defect_log:
                         st.markdown(f"###### Log: {operation_mode}")
 
@@ -2522,18 +3274,113 @@ if st.session_state.uploaded_files:
                         new_positions = np.array([site.frac_coords for site in mod_struct.sites])
                         if not np.allclose(init_positions, new_positions, atol=1e-6):
                             changed = True
-                    elif operation_mode == "Create Substitution Cluster":  # <-- Modified this section
+                    elif operation_mode == "Create Compressed Bubble":
+                        if not enable_second_bubble:
+                            if center_selection_mode == "Random":
+                                bubble_center_coords = np.random.rand(3)
+                            elif center_selection_mode == "Near Element":
+                                element_sites = [i for i, site in enumerate(mod_struct.sites)
+                                                 if site.specie.symbol == center_near_element]
+                                if element_sites:
+                                    random_site_idx = random.choice(element_sites)
+                                    bubble_center_coords = mod_struct.sites[random_site_idx].frac_coords
+                                else:
+                                    bubble_center_coords = np.array([0.5, 0.5, 0.5])
+                                    if col_defect_log:
+                                        col_defect_log.warning(f"Element {center_near_element} not found, using center")
+
+                            if bubble_elements and bubble_n_atoms > 0:
+                                init_n = len(mod_struct)
+                                mod_struct = create_compressed_bubble(
+                                    mod_struct,
+                                    bubble_radius,
+                                    bubble_center_coords,
+                                    bubble_elements,
+                                    bubble_n_atoms,
+                                    bubble_min_dist,
+                                    col_defect_log,
+                                    random_seed
+                                )
+                                if len(mod_struct) != init_n:
+                                    changed = True
+                            else:
+                                if col_defect_log:
+                                    if not bubble_elements:
+                                        col_defect_log.warning("No elements selected for bubble filling")
+                                    if bubble_n_atoms == 0:
+                                        col_defect_log.warning("Number of atoms is zero")
+
+                        else:
+                            center1_frac, center2_frac, separation = find_farthest_bubble_centers(
+                                mod_struct,
+                                center_selection_mode,
+                                bubble_center_coords,
+                                center_near_element if center_selection_mode == "Near Element" else None,
+                                bubble_radius,
+                                bubble2_radius,
+                                random_seed
+                            )
+
+                            if col_defect_log:
+                                col_defect_log.info(f"Bubble centers separation: {separation:.2f} Å")
+                                col_defect_log.write(f"Bubble 1 center (frac): {center1_frac}")
+                                col_defect_log.write(f"Bubble 2 center (frac): {center2_frac}")
+
+                            init_n = len(mod_struct)
+
+                            if bubble_elements and bubble_n_atoms > 0:
+                                mod_struct = create_compressed_bubble(
+                                    mod_struct,
+                                    bubble_radius,
+                                    center1_frac,
+                                    bubble_elements,
+                                    bubble_n_atoms,
+                                    bubble_min_dist,
+                                    col_defect_log,
+                                    random_seed
+                                )
+
+                            if bubble2_elements and bubble2_n_atoms > 0:
+                                mod_struct = create_compressed_bubble(
+                                    mod_struct,
+                                    bubble2_radius,
+                                    center2_frac,
+                                    bubble2_elements,
+                                    bubble2_n_atoms,
+                                    bubble_min_dist,
+                                    col_defect_log,
+                                    random_seed
+                                )
+
+                            if len(mod_struct) != init_n:
+                                changed = True
+                    elif operation_mode == "Create Substitution Cluster":
                         init_comp = mod_struct.composition
                         init_n = len(mod_struct)
-                        mod_struct = create_substitution_cluster(
-                            mod_struct,
-                            orig_element,
-                            sub_element,
-                            num_to_substitute,
-                            cluster_radius_input,
-                            col_defect_log,
-                            delete_non_clustered_original_elements=delete_others  # <-- Pass the new parameter
-                        )
+
+                        cluster_shape = st.session_state.get('cluster_shape', 'Spherical')
+
+                        if cluster_shape == "Spherical":
+                            mod_struct = create_substitution_cluster(
+                                mod_struct,
+                                orig_element,
+                                sub_element,
+                                num_to_substitute,
+                                cluster_radius_input,
+                                col_defect_log,
+                                delete_non_clustered_original_elements=delete_others
+                            )
+                        else:
+                            mod_struct = create_substitution_cluster_rectangular(
+                                mod_struct,
+                                orig_element,
+                                sub_element,
+                                num_to_substitute,
+                                cluster_dimensions,
+                                col_defect_log,
+                                delete_non_clustered_original_elements=delete_others
+                            )
+
                         if mod_struct.composition != init_comp or len(mod_struct) != init_n:
                             changed = True
                     elif operation_mode == "Swap Nearest Elements":
