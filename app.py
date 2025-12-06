@@ -1990,6 +1990,13 @@ if st.session_state.uploaded_files:
                     vac_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
                     vac_percent = {}
                     if vac_els:
+                        vac_input_mode = st.radio(
+                            "Specify vacancies by:",
+                            options=["Percentage", "Number of atoms"],
+                            horizontal=True,
+                            key="vac_input_mode",
+                            help="Choose whether to specify vacancy concentration as percentage or absolute number of atoms"
+                        )
                         st.markdown("**Set vacancy percentages:**")
                         cols_pr = 3
                         n_rows = (len(vac_els) + cols_pr - 1) // cols_pr
@@ -2002,15 +2009,28 @@ if st.session_state.uploaded_files:
                                     el_count = sum(
                                         1 for site in active_pmg_for_defects.sites if site.specie.symbol == el_v)
                                     with vac_perc_cols[c_idx]:
-                                        vac_percent[el_v] = st.slider(
-                                            f"% {el_v} (total: {el_count})",
-                                            min_value=0.000,
-                                            max_value=100.000,
-                                            value=0.000,
-                                            step=0.010,
-                                            key=f"vac_perc_{el_v}",
-                                            help=f"Remove percentage of {el_count} {el_v} atoms"
-                                        )
+                                        if vac_input_mode == "Percentage":
+                                            vac_value = st.slider(
+                                                f"% {el_v} (total: {el_count})",
+                                                min_value=0.000,
+                                                max_value=100.000,
+                                                value=0.000,
+                                                step=0.010,
+                                                key=f"vac_perc_{el_v}",
+                                                help=f"Remove percentage of {el_count} {el_v} atoms"
+                                            )
+                                            vac_percent[el_v] = vac_value
+                                        else:  # Number of atoms
+                                            vac_count = st.number_input(
+                                                f"# {el_v} (max: {el_count})",
+                                                min_value=0,
+                                                max_value=el_count,
+                                                value=0,
+                                                step=1,
+                                                key=f"vac_count_{el_v}",
+                                                help=f"Number of {el_v} atoms to remove (out of {el_count} total)"
+                                            )
+                                            vac_percent[el_v] = (vac_count / el_count * 100) if el_count > 0 else 0
 
                         st.markdown("**Preview of vacancies to be created:**")
                         preview_text = []
@@ -2022,7 +2042,7 @@ if st.session_state.uploaded_files:
                                 n_to_remove = int(round(el_count * perc_to_remove / 100.0))
                                 total_to_remove += n_to_remove
                                 preview_text.append(
-                                    f"**{el_symbol}**: {n_to_remove} atoms ({perc_to_remove}% of {el_count})")
+                                    f"**{el_symbol}**: {n_to_remove} atoms ({round(perc_to_remove,2)}%) of {el_count}")
 
                         if preview_text:
                             for text in preview_text:
@@ -2348,6 +2368,13 @@ if st.session_state.uploaded_files:
                     sub_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
                     sub_settings = {}
                     if sub_els:
+                        sub_input_mode = st.radio(
+                            "Specify substitutions by:",
+                            options=["Percentage", "Number of atoms"],
+                            horizontal=True,
+                            key="sub_input_mode",
+                            help="Choose whether to specify substitution concentration as percentage or absolute number of atoms"
+                        )
                         st.markdown("**Set substitution parameters:**")
 
                         for el_s in sub_els:
@@ -2358,15 +2385,27 @@ if st.session_state.uploaded_files:
                             sub_col1, sub_col2 = st.columns(2)
 
                             with sub_col1:
-                                sub_p = st.slider(
-                                    f"Percentage of {el_s} to substitute",
-                                    min_value=0.00,
-                                    max_value=100.00,
-                                    value=0.00,
-                                    step=0.01,
-                                    key=f"sub_p_{el_s}",
-                                    help=f"Substitute percentage of {el_count_s} {el_s} atoms"
-                                )
+                                if sub_input_mode == "Percentage":
+                                    sub_p = st.slider(
+                                        f"Percentage of {el_s} to substitute",
+                                        min_value=0.00,
+                                        max_value=100.00,
+                                        value=0.00,
+                                        step=0.01,
+                                        key=f"sub_p_{el_s}",
+                                        help=f"Substitute percentage of {el_count_s} {el_s} atoms"
+                                    )
+                                else:  # Number of atoms
+                                    sub_count = st.number_input(
+                                        f"Number of {el_s} to substitute",
+                                        min_value=0,
+                                        max_value=el_count_s,
+                                        value=0,
+                                        step=1,
+                                        key=f"sub_count_{el_s}",
+                                        help=f"Number of {el_s} atoms to substitute (out of {el_count_s} total)"
+                                    )
+                                    sub_p = (sub_count / el_count_s * 100) if el_count_s > 0 else 0
 
                             with sub_col2:
                                 sub_t_el = st.selectbox(
@@ -2392,7 +2431,7 @@ if st.session_state.uploaded_files:
                                 n_to_substitute = int(round(el_count_sub * perc_to_sub / 100.0))
                                 total_to_substitute += n_to_substitute
                                 preview_text_sub.append(
-                                    f"**{orig_el_symbol} → {sub_el_symbol}**: {n_to_substitute} atoms ({perc_to_sub}% of {el_count_sub})")
+                                    f"**{orig_el_symbol} → {sub_el_symbol}**: {n_to_substitute} atoms ({round(perc_to_sub,2)}%) of {el_count_sub}")
 
                         if preview_text_sub:
                             for text in preview_text_sub:
