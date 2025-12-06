@@ -2601,16 +2601,25 @@ if st.session_state.uploaded_files:
                                 elif operation_mode == "Substitute Atoms":
                                     st.markdown("**Substitution Range:**")
 
-                                    selected_sub_element = None
-                                    for el_s in sub_settings.keys():
-                                        if sub_settings[el_s].get("percentage", 0) > 0:
-                                            selected_sub_element = el_s
-                                            break
+                                    elements_to_substitute = [el_s for el_s in sub_settings.keys()
+                                                              if sub_settings[el_s].get("percentage", 0) > 0]
 
-                                    if not selected_sub_element:
+                                    if not elements_to_substitute:
                                         st.warning("Please configure substitution settings first (set percentage > 0)")
                                         use_range_mode = False
                                     else:
+                                        substitution_pairs = []
+                                        for el in elements_to_substitute:
+                                            sub_el = sub_settings[el].get("substitute", "")
+                                            substitution_pairs.append(f"{el}→{sub_el}")
+
+                                        substitution_pairs = []
+                                        for el in elements_to_substitute:
+                                            sub_el = sub_settings[el].get("substitute", "")
+                                            substitution_pairs.append(f"{el}→{sub_el}")
+
+                                        st.info(f"Will vary substitution of **{', '.join(substitution_pairs)}**")
+
                                         range_mode = st.radio(
                                             "Range mode",
                                             options=["Percentage", "Number of atoms"],
@@ -2652,13 +2661,18 @@ if st.session_state.uploaded_files:
                                             range_label = "percent"
                                             range_mode = "percentage"
                                         else:
-                                            element_count = sum(1 for site in active_pmg_for_defects.sites if
-                                                                site.specie.symbol == selected_sub_element)
+                                            element_counts = [sum(1 for site in active_pmg_for_defects.sites
+                                                                  if site.specie.symbol == el)
+                                                              for el in elements_to_substitute]
+                                            min_available = min(element_counts)
+
+                                            st.info(
+                                                f"Maximum atoms available: {min_available} (limited by element with fewest atoms)")
 
                                             min_atoms = st.number_input(
                                                 "Min atoms",
                                                 min_value=1,
-                                                max_value=element_count,
+                                                max_value=min_available,
                                                 value=1,
                                                 step=1,
                                                 key="min_sub_atoms"
@@ -2667,8 +2681,8 @@ if st.session_state.uploaded_files:
                                             max_atoms = st.number_input(
                                                 "Max atoms",
                                                 min_value=min_atoms,
-                                                max_value=element_count,
-                                                value=max(min_atoms, min(10, element_count)),
+                                                max_value=min_available,
+                                                value=max(min_atoms, min(10, min_available)),
                                                 step=1,
                                                 key="max_sub_atoms"
                                             )
@@ -2685,10 +2699,6 @@ if st.session_state.uploaded_files:
                                             defect_range = list(range(min_atoms, max_atoms + 1, step_atoms))
                                             range_label = "atoms"
                                             range_mode = "count"
-
-                                        st.info(
-                                            f"Will vary substitution of **{selected_sub_element}** → **{sub_settings[selected_sub_element]['substitute']}**")
-
                                 elif operation_mode == "Create Vacancies":
                                     st.markdown("**Vacancy Range:**")
 
@@ -2858,19 +2868,24 @@ if st.session_state.uploaded_files:
                                                     if range_mode == "count":
                                                         config_name = f"{int(defect_value)}atoms/config_{int(defect_value)}atoms_rep{rep + 1:02d}_seed{seed}"
 
-                                                        element_count = sum(1 for site in base_struct.sites if
-                                                                            site.specie.symbol == selected_sub_element)
-                                                        percentage_value = (
-                                                                                       defect_value / element_count) * 100 if element_count > 0 else 0
-
                                                         modified_sub_settings = {}
                                                         for el_s in sub_settings.keys():
-                                                            modified_sub_settings[el_s] = {
-                                                                "percentage": percentage_value if sub_settings[
-                                                                                                      el_s].get(
-                                                                    "percentage", 0) > 0 else 0,
-                                                                "substitute": sub_settings[el_s].get("substitute", "")
-                                                            }
+                                                            if sub_settings[el_s].get("percentage", 0) > 0:
+                                                                element_count = sum(1 for site in base_struct.sites if
+                                                                                    site.specie.symbol == el_s)
+                                                                percentage_value = (
+                                                                                               defect_value / element_count) * 100 if element_count > 0 else 0
+                                                                modified_sub_settings[el_s] = {
+                                                                    "percentage": percentage_value,
+                                                                    "substitute": sub_settings[el_s].get("substitute",
+                                                                                                         "")
+                                                                }
+                                                            else:
+                                                                modified_sub_settings[el_s] = {
+                                                                    "percentage": 0,
+                                                                    "substitute": sub_settings[el_s].get("substitute",
+                                                                                                         "")
+                                                                }
                                                     else:
                                                         config_name = f"{defect_value:.2f}perc/config_{defect_value:.2f}perc_rep{rep + 1:02d}_seed{seed}"
 
