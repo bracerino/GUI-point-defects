@@ -37,7 +37,7 @@ def write_poscar_with_selective_dynamics(structure, fixed_atoms, fixed_direction
     ase_atoms = AseAtomsAdaptor.get_atoms(structure)
 
     sio = StringIO()
-    write(sio, ase_atoms, format="vasp", direct=use_fractional, sort=True)
+    write(sio, ase_atoms, format="vasp", direct=use_fractional, sort=False)
     poscar_lines = sio.getvalue().split('\n')
 
     n_atoms = len(ase_atoms)
@@ -85,6 +85,31 @@ def write_poscar_with_selective_dynamics(structure, fixed_atoms, fixed_direction
     return '\n'.join(poscar_lines)
 
 
+def get_atoms_in_height_range(structure, min_height, max_height, coordinate='z'):
+    """
+    Get atom indices within a specified height range.
+
+    Parameters:
+    - structure: pymatgen Structure object
+    - min_height: minimum height in Angstroms
+    - max_height: maximum height in Angstroms
+    - coordinate: 'x', 'y', or 'z' (default: 'z')
+
+    Returns:
+    - set of atom indices within the height range
+    """
+    ase_atoms = AseAtomsAdaptor.get_atoms(structure)
+    coord_idx = {'x': 0, 'y': 1, 'z': 2}[coordinate.lower()]
+
+    atoms_in_range = set()
+    for i, atom in enumerate(ase_atoms):
+        coord_value = atom.position[coord_idx]
+        if min_height <= coord_value <= max_height:
+            atoms_in_range.add(i)
+
+    return atoms_in_range
+
+
 def render_selective_dynamics_ui(structures_dict, selected_file=None):
     st.markdown("### 🔒 Selective Dynamics for POSCAR")
 
@@ -116,7 +141,7 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
 
         fixation_mode = st.radio(
             "Fix atoms by:",
-            ["Element Type", "Specific Atom IDs"],
+            ["Element Type", "Specific Atom IDs", "Height Range"],
             key="sd_fixation_mode"
         )
 
@@ -127,12 +152,49 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
                 default=[],
                 key="sd_elements"
             )
-        else:
+        elif fixation_mode == "Specific Atom IDs":
             atom_ids_input = st.text_area(
                 "Enter atom IDs to fix (comma-separated or ranges):",
                 placeholder="e.g., 0,1,2 or 0-5,10,15-20",
                 key="sd_atom_ids"
             )
+        else:  # Height Range
+            ase_atoms = AseAtomsAdaptor.get_atoms(structure_to_analyze)
+            positions = ase_atoms.get_positions()
+            z_min = positions[:, 2].min()
+            z_max = positions[:, 2].max()
+
+            st.info(f"Structure Z-range: {z_min:.2f} Å to {z_max:.2f} Å")
+
+            height_coord = st.selectbox(
+                "Coordinate axis:",
+                options=['Z', 'Y', 'X'],
+                index=0,
+                key="sd_height_coord"
+            )
+
+            col_min, col_max = st.columns(2)
+
+            with col_min:
+                min_height = st.number_input(
+                    f"Min {height_coord} (Å):",
+                    value=float(z_min),
+                    step=0.1,
+                    format="%.2f",
+                    key="sd_min_height"
+                )
+
+            with col_max:
+                max_height = st.number_input(
+                    f"Max {height_coord} (Å):",
+                    value=min(float(z_min) + 4.0, float(z_max)),
+                    step=0.1,
+                    format="%.2f",
+                    key="sd_max_height"
+                )
+
+            if min_height >= max_height:
+                st.error("⚠️ Minimum height must be less than maximum height")
 
     with col2:
         st.markdown("#### Fixation Directions")
@@ -178,7 +240,7 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
         else:
             st.warning("No elements selected - all atoms will be free")
 
-    else:
+    elif fixation_mode == "Specific Atom IDs":
         if atom_ids_input.strip():
             try:
                 parsed_ids = set()
@@ -212,6 +274,33 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
                 fixed_atoms = set()
         else:
             st.warning("No atom IDs specified - all atoms will be free")
+
+    else:  # Height Range
+        if min_height < max_height:
+            fixed_atoms = get_atoms_in_height_range(
+                structure_to_analyze,
+                min_height,
+                max_height,
+                height_coord.lower()
+            )
+
+            if fixed_atoms:
+                st.info(
+                    f"**Preview**: {len(fixed_atoms)} atoms will be fixed (in {height_coord} range {min_height:.2f}-{max_height:.2f} Å)")
+
+                # Show element breakdown of fixed atoms
+                fixed_elements = {}
+                for atom_id in fixed_atoms:
+                    element = structure_to_analyze.sites[atom_id].specie.symbol
+                    fixed_elements[element] = fixed_elements.get(element, 0) + 1
+
+                if fixed_elements:
+                    element_str = ", ".join([f"{el}: {count}" for el, count in sorted(fixed_elements.items())])
+                    st.caption(f"Fixed atoms by element: {element_str}")
+            else:
+                st.warning(f"No atoms found in {height_coord} range {min_height:.2f}-{max_height:.2f} Å")
+        else:
+            st.warning("Invalid height range - all atoms will be free")
 
     use_fractional = st.checkbox("Use fractional coordinates", value=True, key="sd_fractional")
 
@@ -264,7 +353,7 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
                                 for i, site in enumerate(structure.sites):
                                     if site.specie.symbol in selected_elements:
                                         structure_fixed_atoms.add(i)
-                        else:
+                        elif fixation_mode == "Specific Atom IDs":
                             if atom_ids_input.strip():
                                 try:
                                     parsed_ids = set()
@@ -283,6 +372,14 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
 
                                 except ValueError:
                                     pass
+                        else:  # Height Range
+                            if min_height < max_height:
+                                structure_fixed_atoms = get_atoms_in_height_range(
+                                    structure,
+                                    min_height,
+                                    max_height,
+                                    height_coord.lower()
+                                )
 
                         poscar_content = write_poscar_with_selective_dynamics(
                             structure,
