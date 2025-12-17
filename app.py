@@ -183,9 +183,9 @@ with col1_header:
         """)
 
 
-show_database_search = st.checkbox("Enable **database** search (MP, AFLOW, COD)",
+show_database_search = st.checkbox("Enable **database** search (MP, AFLOW, COD, MC3D)",
                                    value=False,
-                                   help="Enable to search in Materials Project, AFLOW, and COD databases")
+                                   help="Enable to search in Materials Project, AFLOW, COD, and MC3D databases")
 
 enable_selective_dynamics = st.checkbox(
     "🔒 Enable Selective Dynamics Tool",
@@ -213,8 +213,8 @@ if show_database_search:
         with cols:
             db_choices = st.multiselect(
                 "Select Database(s)",
-                options=["Materials Project", "AFLOW", "COD"],
-                default=["Materials Project", "AFLOW", "COD"],
+                options=["Materials Project", "AFLOW", "COD", "MC3D"],
+                default=["Materials Project", "COD", "MC3D"],
                 help="Choose which databases to search for structures. You can select multiple databases."
             )
 
@@ -222,7 +222,7 @@ if show_database_search:
                 st.warning("Please select at least one database to search.")
 
             st.markdown("**Maximum number of structures to be found in each database (for improving performance):**")
-            col_limits = st.columns(3)
+            col_limits = st.columns(4)
 
             search_limits = {}
             if "Materials Project" in db_choices:
@@ -243,6 +243,12 @@ if show_database_search:
                         "COD Limit:", min_value=1, max_value=2000, value=300, step=10,
                         help="Maximum results from COD"
                     )
+            if "MC3D" in db_choices:
+                with col_limits[3]:
+                    search_limits["MC3D"] = st.number_input(
+                        "MC3D Limit:", min_value=1, max_value=2000, value=300, step=10,
+                        help="Maximum results from MC3D"
+                    )
 
         with cols2:
             search_mode = st.radio(
@@ -255,7 +261,7 @@ if show_database_search:
                 selected_elements = st.multiselect(
                     "Select elements for search:",
                     options=ELEMENTS,
-                    default=["Sr", "Ti", "O"],
+                    default=["Na", "Cl"],
                     help="Choose one or more chemical elements"
                 )
                 search_query = " ".join(selected_elements) if selected_elements else ""
@@ -263,31 +269,28 @@ if show_database_search:
             elif search_mode == "Structure ID":
                 structure_ids = st.text_area(
                     "Enter Structure IDs (one per line):",
-                    value="mp-5229\ncod_1512124\naflow:010158cb2b41a1a5",
+                    value="mp-5229\ncod_1512124\naflow:010158cb2b41a1a5\nmc3d-667864",
                     help="Enter structure IDs. Examples:\n- Materials Project: mp-5229\n- COD: cod_1512124 (with cod_ prefix)\n- AFLOW: aflow:010158cb2b41a1a5 (AUID format)"
                 )
 
             elif search_mode == "Space Group + Elements":
-                col_sg1, col_sg2 = st.columns(2)
-                with col_sg1:
-                    all_space_groups_help = "Enter space group number (1-230)\n\nAll space groups:\n\n"
-                    for num in sorted(SPACE_GROUP_SYMBOLS.keys()):
-                        all_space_groups_help += f"• {num}: {SPACE_GROUP_SYMBOLS[num]}\n\n"
+                selected_space_group = st.selectbox(
+                    "Select Space Group:",
+                    options=SPACE_GROUP_OPTIONS,
+                    index=224,  #
+                    help="Start typing to search by number or symbol",
+                    key="db_search_space_group"
+                )
 
-                    space_group_number = st.number_input(
-                        "Space Group Number:",
-                        min_value=1,
-                        max_value=230,
-                        value=221,
-                        help=all_space_groups_help
-                    )
-                    sg_symbol = get_space_group_info(space_group_number)
-                    st.info(f"#:**{sg_symbol}**")
+                space_group_number = extract_space_group_number(selected_space_group)
+                space_group_symbol = selected_space_group.split('(')[1][:-1] if selected_space_group else ""
+
+                # st.info(f"Selected: **{space_group_number}** ({space_group_symbol})")
 
                 selected_elements = st.multiselect(
                     "Select elements for search:",
                     options=ELEMENTS,
-                    default=["Sr", "Ti", "O"],
+                    default=["Na", "Cl"],
                     help="Choose one or more chemical elements"
                 )
 
@@ -311,6 +314,8 @@ if show_database_search:
                             'formula': formula,
                             'mineral_name': mineral_name
                         }
+
+                # Sort mineral options alphabetically
                 mineral_options.sort()
 
                 selected_mineral = st.selectbox(
@@ -323,10 +328,12 @@ if show_database_search:
                 if selected_mineral:
                     mineral_info = mineral_mapping[selected_mineral]
 
+                    # col_mineral1, col_mineral2 = st.columns(2)
+                    # with col_mineral1:
                     sg_symbol = get_space_group_info(mineral_info['space_group'])
-                    st.info(f"**Structure:** {mineral_info['mineral_name']}, **Space Group:** {mineral_info['space_group']} ({sg_symbol}), "
-                            f"**Formula:** {mineral_info['formula']}")
-
+                    st.info(
+                        f"**Structure:** {mineral_info['mineral_name']}, **Space Group:** {mineral_info['space_group']} ({sg_symbol}), "
+                        f"**Formula:** {mineral_info['formula']}")
 
                     space_group_number = mineral_info['space_group']
                     formula_input = mineral_info['formula']
@@ -404,6 +411,7 @@ if show_database_search:
                                             st.warning("Please enter a chemical formula for Materials Project search.")
                                             continue
 
+                                        # Convert space-separated format to compact format (Sr Ti O3 -> SrTiO3)
                                         clean_formula = formula_input.strip()
                                         if ' ' in clean_formula:
                                             parts = clean_formula.split()
@@ -450,7 +458,7 @@ if show_database_search:
                                             lattice_str = (f"{lattice.a:.3f} {lattice.b:.3f} {lattice.c:.3f} Å, "
                                                            f"{lattice.alpha:.1f}, {lattice.beta:.1f}, {lattice.gamma:.1f} °")
                                             st.session_state.mp_options.append(
-                                                f"{doc.material_id}: {doc.formula_pretty} ({doc.symmetry.symbol} #{doc.symmetry.number}) [{lattice_str}], {float(doc.volume):.1f} Å³, {leng} atoms"
+                                                f"{doc.formula_pretty} ({doc.symmetry.symbol} #{doc.symmetry.number}), {leng} atoms, [{lattice_str}], {float(doc.volume):.1f} Å³, {doc.material_id}:"
                                             )
                                             status_placeholder.markdown(
                                                 f"- **Structure loaded:** `{full_structure.composition.reduced_formula}` ({doc.material_id})"
@@ -717,7 +725,7 @@ if show_database_search:
                                     for entry in limited_results:
                                         st.session_state.entrys[entry.auid] = entry
                                         st.session_state.aflow_options.append(
-                                            f"{entry.auid}: {entry.compound} ({entry.spacegroup_relax}) {entry.geometry}"
+                                            f"{entry.compound} ({entry.spacegroup_relax}) {entry.geometry}, {entry.auid}"
                                         )
                                         status_placeholder.markdown(
                                             f"- **Structure loaded:** `{entry.compound}` (aflow_{entry.auid})"
@@ -732,7 +740,134 @@ if show_database_search:
                             except Exception as e:
                                 st.warning(f"No matching structures found in AFLOW.")
                                 st.session_state.aflow_options = []
+                    elif db_choice == "MC3D":
+                        mc3d_limit = search_limits.get("MC3D", 300)
+                        with st.spinner(f"Searching **the MC3D database** (limit: {mc3d_limit}), please wait. 😊"):
+                            results = []
 
+                            try:
+                                query_params = {}
+
+                                if search_mode == "Elements":
+                                    elements_list = [el.strip() for el in search_query.split() if el.strip()]
+                                    if not elements_list:
+                                        st.warning("Please enter elements for MC3D search.")
+                                    else:
+                                        query_params['elements'] = sorted(set(elements_list))
+                                        results = search_mc3d_optimade(query_params, limit=mc3d_limit)
+
+                                elif search_mode == "Structure ID":
+                                    mc3d_ids = []
+                                    for id_line in structure_ids.split('\n'):
+                                        id_line = id_line.strip()
+                                        if id_line.startswith('mc3d-') or id_line.startswith('mcloud-'):
+                                            mc3d_ids.append(id_line)
+
+                                    if not mc3d_ids:
+                                        st.warning("No valid MC3D IDs found (should start with 'mc3d-' or 'mcloud-')")
+                                    else:
+                                        for mc3d_id in mc3d_ids:
+                                            structure = get_mc3d_structure_by_id(mc3d_id)
+                                            if structure:
+                                                results.append({
+                                                    'id': mc3d_id,
+                                                    'structure': structure,
+                                                    'formula': structure.composition.reduced_formula
+                                                })
+
+                                elif search_mode == "Space Group + Elements":
+                                    if not selected_elements:
+                                        st.warning("Please select elements for MC3D space group search.")
+                                    else:
+                                        query_params['elements'] = sorted(selected_elements)
+                                        results = search_mc3d_optimade(query_params, limit=mc3d_limit)
+
+                                        filtered_results = []
+                                        for result in results:
+                                            structure = result['structure']
+                                            analyzer = SpacegroupAnalyzer(structure)
+                                            if analyzer.get_space_group_number() == space_group_number:
+                                                filtered_results.append(result)
+                                        results = filtered_results
+
+                                elif search_mode == "Formula":
+                                    if not formula_input.strip():
+                                        st.warning("Please enter a chemical formula for MC3D search.")
+                                    else:
+                                        try:
+                                            from pymatgen.core import Composition
+
+                                            comp = Composition(formula_input.strip())
+                                            normalized_formula = comp.reduced_formula
+                                            query_params['formula'] = normalized_formula
+                                            st.info(f"Searching for normalized formula: {normalized_formula}")
+                                        except:
+                                            query_params['formula'] = formula_input.strip()
+                                        results = search_mc3d_optimade(query_params, limit=mc3d_limit)
+
+                                elif search_mode == "Search Mineral":
+                                    if not selected_mineral:
+                                        st.warning("Please select a mineral structure for MC3D search.")
+                                    else:
+                                        try:
+                                            from pymatgen.core import Composition
+
+                                            comp = Composition(formula_input.strip())
+                                            normalized_formula = comp.reduced_formula
+                                            query_params['formula'] = normalized_formula
+                                        except:
+                                            query_params['formula'] = formula_input.strip()
+
+                                        results = search_mc3d_optimade(query_params, limit=mc3d_limit)
+
+                                        filtered_results = []
+                                        for result in results:
+                                            structure = result['structure']
+                                            analyzer = SpacegroupAnalyzer(structure)
+                                            if analyzer.get_space_group_number() == space_group_number:
+                                                filtered_results.append(result)
+                                        results = filtered_results
+
+                                else:
+                                    if query_params:
+                                        results = search_mc3d_optimade(query_params, limit=mc3d_limit)
+
+                                if results:
+                                    st.session_state.mc3d_options = []
+                                    st.session_state.mc3d_structures = {}
+
+                                    for result in results:
+                                        mc3d_id = result['id']
+                                        structure = result['structure']
+                                        formula = result['formula']
+
+                                        st.session_state.mc3d_structures[mc3d_id] = structure
+
+                                        analyzer = SpacegroupAnalyzer(structure)
+                                        sg_number = analyzer.get_space_group_number()
+                                        sg_symbol = SPACE_GROUP_SYMBOLS.get(sg_number, f"SG#{sg_number}")
+
+                                        n_elements = len(structure.composition.elements)
+
+                                        option_str = (
+                                            f"{formula} ({sg_symbol} #{sg_number}), "
+                                            f"{n_elements} elements, "
+                                            f"{mc3d_id}"
+                                        )
+                                        st.session_state.mc3d_options.append(option_str)
+
+                                    st.success(
+                                        f"✅ Found {len(st.session_state.mc3d_options)} structures in MC3D via OPTIMADE.")
+                                else:
+                                    st.session_state.mc3d_options = []
+                                    st.warning("No matching structures found in MC3D.")
+
+                            except Exception as e:
+                                st.error(f"MC3D search error: {str(e)}")
+                                import traceback
+
+                                st.write(traceback.format_exc())
+                                st.session_state.mc3d_options = []
                     elif db_choice == "COD":
                         cod_limit = search_limits.get("COD", 50)
                         with st.spinner(f"Searching **the COD database** (limit: {cod_limit}), please wait. 😊"):
@@ -823,41 +958,57 @@ if show_database_search:
                                     cod_entries = get_cod_entries(params)
 
                                 if cod_entries and isinstance(cod_entries, list):
-                                    status_placeholder = st.empty()
                                     st.session_state.cod_options = []
                                     st.session_state.full_structures_see_cod = {}
-
+                                    status_placeholder = st.empty()
                                     limited_entries = cod_entries[:cod_limit]
+                                    errors = []
 
-                                    for entry in limited_entries:
-                                        try:
-                                            cif_content = get_cif_from_cod(entry)
-                                            if cif_content:
-                                                structure = get_cod_str(cif_content)
-                                                cod_id = f"cod_{entry.get('file')}"
-                                                st.session_state.full_structures_see_cod[cod_id] = structure
-                                                spcs = entry.get("sg", "Unknown")
-                                                spcs_number = entry.get("sgNumber", "Unknown")
+                                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                                        future_to_entry = {executor.submit(fetch_and_parse_cod_cif, entry): entry for
+                                                           entry in limited_entries}
 
-                                                cell_volume = structure.lattice.volume
-                                                st.session_state.cod_options.append(
-                                                    f"{cod_id}: {structure.composition.reduced_formula} ({spcs} #{spcs_number}) [{structure.lattice.a:.3f} {structure.lattice.b:.3f} {structure.lattice.c:.3f} Å, {structure.lattice.alpha:.2f} "
-                                                    f"{structure.lattice.beta:.2f} {structure.lattice.gamma:.2f}] °, {cell_volume:.1f} Å³, {len(structure)} atoms "
-                                                )
-                                                status_placeholder.markdown(
-                                                    f"- **Structure loaded:** `{structure.composition.reduced_formula}` (cod_{entry.get('file')})")
-                                        except Exception as e:
-                                            st.warning(
-                                                f"Error processing COD entry {entry.get('file', 'unknown')}: {e}")
-                                            continue
+                                        processed_count = 0
+                                        for future in concurrent.futures.as_completed(future_to_entry):
+                                            processed_count += 1
+                                            status_placeholder.markdown(
+                                                f"- **Processing:** {processed_count}/{len(limited_entries)} entries...")
+                                            try:
+                                                cod_id, structure, entry_data, error = future.result()
+                                                if error:
+                                                    original_entry = future_to_entry[future]
+                                                    errors.append(
+                                                        f"Entry `{original_entry.get('file', 'N/A')}` failed: {error}")
+                                                    continue  # Skip to the next completed future
+                                                if cod_id and structure and entry_data:
+                                                    st.session_state.full_structures_see_cod[cod_id] = structure
 
+                                                    spcs = entry_data.get("sg", "Unknown")
+                                                    spcs_number = entry_data.get("sgNumber", "Unknown")
+                                                    cell_volume = structure.lattice.volume
+                                                    option_str = (
+                                                        f"{structure.composition.reduced_formula} ({spcs} #{spcs_number}), {len(structure)} atoms, [{structure.lattice.a:.3f} {structure.lattice.b:.3f} {structure.lattice.c:.3f} Å, {structure.lattice.alpha:.2f}, "
+                                                        f"{structure.lattice.beta:.2f}, {structure.lattice.gamma:.2f}°], {cell_volume:.1f} Å³, {cod_id}"
+                                                    )
+                                                    st.session_state.cod_options.append(option_str)
+
+                                            except Exception as e:
+                                                errors.append(
+                                                    f"A critical error occurred while processing a result: {e}")
+                                    status_placeholder.empty()
                                     if st.session_state.cod_options:
                                         if len(limited_entries) < len(cod_entries):
                                             st.info(
                                                 f"Showing first {cod_limit} of {len(cod_entries)} total COD results. Increase limit to see more.")
-                                        st.success(f"Found {len(st.session_state.cod_options)} structures in COD.")
+                                        st.success(
+                                            f"Found and processed {len(st.session_state.cod_options)} structures from COD.")
                                     else:
-                                        st.warning("COD: No valid structures could be processed.")
+                                        st.warning("COD: No matching structures could be successfully processed.")
+                                    if errors:
+                                        st.error(f"Encountered {len(errors)} error(s) during the search.")
+                                        with st.container(border=True):
+                                            for e in errors:
+                                                st.warning(e)
                                 else:
                                     st.session_state.cod_options = []
                                     st.warning("COD: No matching structures found.")
@@ -865,9 +1016,9 @@ if show_database_search:
                                 st.warning(f"COD search error: {e}")
                                 st.session_state.cod_options = []
 
-           # with cols2:
-           #     image = Image.open("images/Rabbit2.png")
-           #     st.image(image, use_container_width=True)
+        # with cols2:
+        #     image = Image.open("images/Rabbit2.png")
+        #     st.image(image, use_container_width=True)
 
         with cols3:
             if any(x in st.session_state for x in ['mp_options', 'aflow_options', 'cod_options']):
@@ -878,7 +1029,8 @@ if show_database_search:
                     tabs.append("AFLOW")
                 if 'cod_options' in st.session_state and st.session_state.cod_options:
                     tabs.append("COD")
-
+                if 'mc3d_options' in st.session_state and st.session_state.mc3d_options:
+                    tabs.append("MC3D")
                 if tabs:
                     selected_tab = st.tabs(tabs)
 
@@ -888,8 +1040,8 @@ if show_database_search:
                             st.subheader("🧬 Structures Found in Materials Project")
                             selected_structure = st.selectbox("Select a structure from MP:",
                                                               st.session_state.mp_options)
-                            selected_id = selected_structure.split(":")[0].strip()
-                            composition = selected_structure.split(":", 1)[1].split("(")[0].strip()
+                            selected_id = selected_structure.split(",")[-1].replace(":", "").strip()
+                            composition = selected_structure.split("(")[0].strip()
                             file_name = f"{selected_id}_{composition}.cif"
                             file_name = re.sub(r'[\\/:"*?<>|]+', '_', file_name)
 
@@ -909,7 +1061,7 @@ if show_database_search:
                                     f"**Space Group:** {analyzer.get_space_group_symbol()} ({analyzer.get_space_group_number()})")
 
                                 st.write(
-                                    f"**Material ID:** {selected_id}, **Formula:** {composition}, N. of Atoms {n_atoms}")
+                                    f"**Material ID:** {selected_id}, **Formula:** {composition}, **N. of Atoms:** {n_atoms}")
 
                                 st.write(
                                     f"**Conventional Lattice:** a = {conv_lattice.a:.4f} Å, b = {conv_lattice.b:.4f} Å, c = {conv_lattice.c:.4f} Å, α = {conv_lattice.alpha:.1f}°, β = {conv_lattice.beta:.1f}°, γ = {conv_lattice.gamma:.1f}° (Volume {cell_volume:.1f} Å³)")
@@ -942,8 +1094,8 @@ if show_database_search:
                                         type="primary",
                                         mime="chemical/x-cif"
                                     )
-                                    st.info(
-                                        f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
+                                st.info(
+                                    f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
                         tab_index += 1
 
                     if 'aflow_options' in st.session_state and st.session_state.aflow_options:
@@ -953,7 +1105,7 @@ if show_database_search:
                                 "The AFLOW does not provide atomic occupancies and includes only information about primitive cell in API. For better performance, volume and n. of atoms are purposely omitted from the expander.")
                             selected_structure = st.selectbox("Select a structure from AFLOW:",
                                                               st.session_state.aflow_options)
-                            selected_auid = selected_structure.split(": ")[0].strip()
+                            selected_auid = selected_structure.split(",")[-1].strip()
                             selected_entry = next(
                                 (entry for entry in st.session_state.entrys.values() if entry.auid == selected_auid),
                                 None)
@@ -1036,7 +1188,7 @@ if show_database_search:
                                 st.session_state.cod_options,
                                 key='sidebar_select_cod'
                             )
-                            cod_id = selected_cod_structure.split(":")[0].strip()
+                            cod_id = selected_cod_structure.split(",")[-1].strip()
                             if cod_id in st.session_state.full_structures_see_cod:
                                 selected_entry = st.session_state.full_structures_see_cod[cod_id]
                                 lattice = selected_entry.lattice
@@ -1086,6 +1238,79 @@ if show_database_search:
                                 )
                                 st.info(
                                     f"**Note**: If H element is missing in CIF file, it is not shown in the formula either.")
+
+                    # MC3D tab
+                    if 'mc3d_options' in st.session_state and st.session_state.mc3d_options:
+                        with selected_tab[tab_index]:
+                            st.subheader("🧬 Structures Found in MC3D")
+                            st.info("ℹ️ MC3D structures accessed via OPTIMADE API from Materials Cloud.")
+
+                            selected_structure = st.selectbox("Select a structure from MC3D:",
+                                                              st.session_state.mc3d_options,
+                                                              key='sidebar_select_mc3d')
+                            mc3d_id = selected_structure.split(",")[-1].strip()
+
+                            if mc3d_id in st.session_state.mc3d_structures:
+                                selected_entry = st.session_state.mc3d_structures[mc3d_id]
+
+                                lattice = selected_entry.lattice
+                                cell_volume = lattice.volume
+                                density = str(selected_entry.density).split()[0]
+                                n_atoms = len(selected_entry)
+                                atomic_den = n_atoms / cell_volume
+
+                                structure_type = identify_structure_type(selected_entry)
+                                st.write(f"**Structure type:** {structure_type}")
+
+                                analyzer = SpacegroupAnalyzer(selected_entry)
+                                st.write(
+                                    f"**Space Group:** {analyzer.get_space_group_symbol()} ({analyzer.get_space_group_number()})")
+
+                                composition = selected_entry.composition.reduced_formula
+                                st.write(
+                                    f"**MC3D ID:** {mc3d_id}, **Formula:** {composition}, **N. of Atoms:** {n_atoms}")
+                                st.write(
+                                    f"**Lattice:** a = {lattice.a:.3f} Å, b = {lattice.b:.3f} Å, c = {lattice.c:.3f} Å, "
+                                    f"α = {lattice.alpha:.2f}°, β = {lattice.beta:.2f}°, γ = {lattice.gamma:.2f}° "
+                                    f"(Volume {cell_volume:.1f} Å³)")
+                                st.write(f"**Density:** {float(density):.2f} g/cm³ ({atomic_den:.4f} 1/Å³)")
+
+                                mc3d_url = f"https://mc3d.materialscloud.org/#/details/{mc3d_id}/pbe-v1"
+                                st.write(f"**Link:** [View on Materials Cloud]({mc3d_url})")
+
+                                file_name = f"{mc3d_id}_{composition}.cif"
+                                file_name = re.sub(r'[\\/:"*?<>|]+', '_', file_name)
+
+                                col_mc3d1, col_mc3d2 = st.columns([1, 1])
+                                with col_mc3d1:
+                                    if st.button("Add Selected Structure (MC3D)", key="add_btn_mc3d"):
+                                        cif_writer = CifWriter(selected_entry, symprec=0.01)
+                                        cif_data = str(cif_writer)
+                                        st.session_state.full_structures[file_name] = selected_entry
+
+                                        cif_file = io.BytesIO(cif_data.encode('utf-8'))
+                                        cif_file.name = file_name
+
+                                        if 'uploaded_files' not in st.session_state:
+                                            st.session_state.uploaded_files = []
+                                        if all(f.name != file_name for f in st.session_state.uploaded_files):
+                                            st.session_state.uploaded_files.append(cif_file)
+
+                                        check_structure_size_and_warn(selected_entry, file_name)
+                                        st.success("Structure added from MC3D!")
+
+                                with col_mc3d2:
+                                    st.download_button(
+                                        label="💾 Download MC3D CIF",
+                                        data=str(CifWriter(selected_entry, symprec=0.01)),
+                                        file_name=file_name,
+                                        mime="chemical/x-cif",
+                                        type="primary"
+                                    )
+
+                                st.info(
+                                    f"**Note**: Structures retrieved via OPTIMADE API from Materials Cloud MC3D database.")
+                        tab_index += 1
 
 
 
