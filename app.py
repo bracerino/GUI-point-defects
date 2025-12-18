@@ -200,7 +200,7 @@ if enable_selective_dynamics:
             selected_file=st.session_state.get('selected_file')
         )
     else:
-        st.warning("Upload structure files first to use the Selective Dynamics tool")
+        st.warning("Upload structure files first to use the Selective Dynamics tool. 🎥 See also the tutorial on [YouTube](https://youtu.be/dvC8ohlW51k?si=Q4_lKTaYa06v_5-_).")
 
 def get_space_group_info(number):
     symbol = SPACE_GROUP_SYMBOLS.get(number, f"SG#{number}")
