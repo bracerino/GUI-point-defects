@@ -1074,7 +1074,6 @@ if show_database_search:
                                 with col_mpd:
                                     if st.button("Add Selected Structure (MP)", key="add_btn_mp"):
                                         pmg_structure = st.session_state.full_structures_see[selected_id]
-                                        check_structure_size_and_warn(pmg_structure, f"MP structure {selected_id}")
                                         st.session_state.full_structures[file_name] = pmg_structure
                                         cif_writer = CifWriter(pmg_structure)
                                         cif_content = cif_writer.__str__()
@@ -1161,7 +1160,6 @@ if show_database_search:
 
                                         st.session_state.full_structures[cif_file.name] = structure_from_aflow
 
-                                        check_structure_size_and_warn(structure_from_aflow, cif_file.name)
                                         if all(f.name != cif_file.name for f in st.session_state.uploaded_files):
                                             st.session_state.uploaded_files.append(cif_file)
                                         st.success("Structure added from AFLOW!")
@@ -1227,7 +1225,7 @@ if show_database_search:
                                     if all(f.name != file_name for f in st.session_state.uploaded_files):
                                         st.session_state.uploaded_files.append(cif_file)
 
-                                    check_structure_size_and_warn(selected_entry, file_name)
+                                
                                     st.success("Structure added from COD!")
 
                                 st.download_button(
@@ -1297,7 +1295,6 @@ if show_database_search:
                                         if all(f.name != file_name for f in st.session_state.uploaded_files):
                                             st.session_state.uploaded_files.append(cif_file)
 
-                                        check_structure_size_and_warn(selected_entry, file_name)
                                         st.success("Structure added from MC3D!")
 
                                 with col_mc3d2:
