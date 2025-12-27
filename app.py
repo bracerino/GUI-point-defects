@@ -208,6 +208,50 @@ def get_space_group_info(number):
 
 
 if show_database_search:
+    css = '''
+        <style>
+        .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+            font-size: 1.15rem !important;
+            color: #1e3a8a !important;
+            font-weight: 600 !important;
+            margin: 0 !important;
+        }
+        
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 20px !important;
+        }
+        
+        .stTabs [data-baseweb="tab-list"] button {
+            background-color: #f0f4ff !important;
+            border-radius: 12px !important;
+            padding: 8px 16px !important;
+            transition: all 0.3s ease !important;
+            border: none !important;
+            color: #1e3a8a !important;
+        }
+        
+        .stTabs [data-baseweb="tab-list"] button:hover {
+            background-color: #dbe5ff !important;
+            cursor: pointer;
+        }
+        
+        .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+            background-color: #e0e7ff !important;
+            color: #1e3a8a !important;
+            font-weight: 700 !important;
+            box-shadow: 0 2px 6px rgba(30, 58, 138, 0.3) !important;
+        
+            /* Added underline (thicker) */
+            border-bottom: 4px solid #1e3a8a !important;
+            border-radius: 12px 12px 0 0 !important; /* keep rounded only on top */
+        }
+        
+        .stTabs [data-baseweb="tab-list"] button:focus {
+            outline: none !important;
+        }
+        </style>
+        '''
+    st.markdown(css, unsafe_allow_html=True)
     with st.expander("Search for Structures Online in Databases", icon="🔍", expanded=True):
         cols, cols2, cols3 = st.columns([1.5, 1.5, 3.5])
         with cols:
