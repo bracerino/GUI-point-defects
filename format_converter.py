@@ -116,7 +116,6 @@ def render_converter_uploader():
 
     uploaded_files = st.file_uploader(
         "Upload structure files (CIF, POSCAR, LAMMPS, XYZ)",
-        type=['cif', 'poscar', 'vasp', 'contcar', 'lmp', 'xyz'],
         accept_multiple_files=True,
         key="converter_file_uploader",
         help="Upload multiple structure files to convert them to another format"
