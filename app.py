@@ -193,6 +193,17 @@ enable_selective_dynamics = st.checkbox(
     help="Enable tool to fix atomic positions in POSCAR files"
 )
 
+from format_converter import render_format_converter_ui
+
+enable_format_converter = st.checkbox(
+    "🔄 Enable Format Converter Tool",
+    value=False,
+    help="Convert structures between CIF, POSCAR, LAMMPS, and XYZ formats"
+)
+
+if enable_format_converter:
+    render_format_converter_ui(st.session_state.get('full_structures', {}))
+    
 if enable_selective_dynamics:
     if 'full_structures' in st.session_state and st.session_state.full_structures:
         render_selective_dynamics_ui(
