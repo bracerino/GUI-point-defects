@@ -1372,9 +1372,9 @@ if st.session_state.first_run_note:
     colh1, colh2 = st.columns([1, 3])
     with colh1:
         try:
-            st.image(Image.open("images/Rb.png"))
+            st.image(Image.open("images/cedule.png"))
         except FileNotFoundError:
-            st.warning("Note: Rb.png image not found in images/ folder.")
+            st.warning("Note: cedule.png image not found in images/ folder.")
     with colh2:
         st.info("""
         Upload your crystal structure file. It will default to its **conventional cell**.
