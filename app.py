@@ -3837,14 +3837,27 @@ if st.session_state.uploaded_files:
                         )
 
                 with col_dl:
+                    # --- Symmetry tolerance control ---
+                    symprec_value = st.number_input(
+                        "Symmetry tolerance (Å)",
+                        min_value=0.001,
+                        max_value=2.0,
+                        value=0.1,
+                        step=0.01,
+                        format="%.3f",
+                        key="symprec_input",
+                        help="Tolerance in atomic positions used to detect symmetry. "
+                             "Larger values are more forgiving of small distortions; "
+                             "smaller values are stricter."
+                    )
+
                     col_sg_analysis, col_sg_apply = st.columns(2)
                     with col_sg_analysis:
-                        if st.button("🔍 Determine Space Group", key="determine_sg_btn", type='secondary',
-                                     ):
+                        if st.button("🔍 Determine Space Group", key="determine_sg_btn", type='secondary'):
                             if pmg_to_visualize:
                                 with st.spinner("Analyzing symmetry..."):
                                     try:
-                                        analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=0.1)
+                                        analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=symprec_value)
                                         spg_symbol = analyzer.get_space_group_symbol()
                                         spg_number = analyzer.get_space_group_number()
                                         crystal_system = analyzer.get_crystal_system()
@@ -3868,7 +3881,8 @@ if st.session_state.uploaded_files:
                                         if laue_group != point_group:
                                             st.info(f"**Point Group:** {point_group}, **Laue Group:** {laue_group}")
                                         else:
-                                            st.info(f"**Point Group:** {point_group}, **Laue Group:** {laue_group} (same as point group)")
+                                            st.info(
+                                                f"**Point Group:** {point_group}, **Laue Group:** {laue_group} (same as point group)")
 
                                         try:
                                             conventional = analyzer.get_conventional_standard_structure()
@@ -3890,16 +3904,14 @@ if st.session_state.uploaded_files:
                                 st.error("No structure available for analysis")
 
                     with col_sg_apply:
-                        if st.button("⚙️ Apply Symmetry", key="apply_symmetry_btn", type = 'secondary',
-                                     ):
+                        if st.button("⚙️ Apply Symmetry", key="apply_symmetry_btn", type='secondary'):
                             if pmg_to_visualize:
                                 with st.spinner("Applying standard symmetry..."):
                                     try:
-
                                         original_atoms = len(pmg_to_visualize)
                                         original_formula = pmg_to_visualize.composition.reduced_formula
 
-                                        analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=0.1)
+                                        analyzer = SpacegroupAnalyzer(pmg_to_visualize, symprec=symprec_value)
 
                                         conventional_structure = analyzer.get_conventional_standard_structure()
 
