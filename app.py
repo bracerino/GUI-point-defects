@@ -23,7 +23,6 @@ from helpers_defects import *
 import numpy as np
 from ase.io import write
 from pymatgen.io.ase import AseAtomsAdaptor
-import streamlit.components.v1 as components
 import py3Dmol
 from io import StringIO
 import pandas as pd
@@ -35,6 +34,7 @@ from pymatgen.core import Structure, Element
 from PIL import Image
 from pymatgen.transformations.standard_transformations import SupercellTransformation
 from create_selective_dynamics import render_selective_dynamics_ui
+from script_generator import build_batch_script
 
 
 MP_API_KEY = "UtfGa1BUI3RlWYVwfpMco2jVt8ApHOye"
@@ -54,12 +54,39 @@ ELEMENTS = [
 ]
 
 
+def _running_locally():
+    """Detect whether the app runs locally (vs. an online/cloud deployment).
+
+    Honors an explicit APP_ENV override ("local"/"dev" or "online"/"cloud"/"prod").
+    Otherwise auto-detects Streamlit Community Cloud (repo mounted at /mount/src,
+    or the 'appuser' account) and treats anything else as local.
+    """
+    env = os.environ.get("APP_ENV", "").strip().lower()
+    if env in ("local", "dev", "development"):
+        return True
+    if env in ("online", "cloud", "production", "prod"):
+        return False
+    if os.path.exists("/mount/src") or os.environ.get("USER") == "appuser":
+        return False
+    return True
+
+
+# Upper bound for "Configurations per concentration" in batch generation:
+# higher locally, capped lower for the shared online deployment.
+MAX_CONFIGS_PER_CONCENTRATION = 1000 if _running_locally() else 100
+
+# Cap on the TOTAL number of structures one batch run may produce (e.g. a nested
+# concentration grid: n1 * n2 * configs_per_concentration). Unlimited locally,
+# capped on the shared online deployment to protect the server.
+MAX_TOTAL_CONFIGS = None if _running_locally() else 1000
+
+
 def get_orthogonal_cell(structure, max_atoms=200):
     from pymatgen.transformations.advanced_transformations import CubicSupercellTransformation
 
     from pymatgen.io.ase import AseAtomsAdaptor
     ase_atoms = AseAtomsAdaptor.get_atoms(structure)
-    angles = ase_atoms.get_cell_lengths_and_angles()[3:]
+    angles = ase_atoms.cell.cellpar()[3:]
     if all(abs(angle - 90.0) < 1e-6 for angle in angles):
         return structure.copy()
 
@@ -92,7 +119,7 @@ def get_orthogonal_cell(structure, max_atoms=200):
                     test_structure = sc_transformer.apply_transformation(structure)
 
                     ase_test = AseAtomsAdaptor.get_atoms(test_structure)
-                    test_angles = ase_test.get_cell_lengths_and_angles()[3:]
+                    test_angles = ase_test.cell.cellpar()[3:]
 
                     if all(abs(angle - 90.0) < 5.0 for angle in test_angles):
                         return test_structure
@@ -128,7 +155,6 @@ def get_structure_info(structure):
     info_text += f"a={cell_params[0]:.3f} Å, b={cell_params[1]:.3f} Å, c={cell_params[2]:.3f} Å\n"
     info_text += f"α={cell_params[3]:.1f}°, β={cell_params[4]:.1f}°, γ={cell_params[5]:.1f}°\n"
     info_text += f"Vol={volume:.2f} Å³"
-    print(f"Successfully uploaded structure {info_text}")
     return info_text
 
 
@@ -158,12 +184,107 @@ st.markdown("""
         background-color: #5a2d91 !important; color: white !important; box-shadow: none !important;
     }
 
+    /* Stretch every button (and download button) to fill its column */
+    div.stButton > button,
+    div.stDownloadButton > button,
+    div[data-testid="stFormSubmitButton"] > button { width: 100%; }
+
     div[data-testid="stDataFrameContainer"] table td { font-size: 16px !important; }
-    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+.stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+    font-size: 1.15rem !important;
+    color: #1e3a8a !important;
+    font-weight: 600 !important;
+    margin: 0 !important;
+}
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 20px !important;
+}
+
+.stTabs [data-baseweb="tab-list"] button {
+    background-color: #f0f4ff !important;
+    border-radius: 12px !important;
+    padding: 8px 16px !important;
+    transition: all 0.3s ease !important;
+    border: none !important;
+    color: #1e3a8a !important;
+}
+
+.stTabs [data-baseweb="tab-list"] button:hover {
+    background-color: #dbe5ff !important;
+    cursor: pointer;
+}
+
+.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+    background-color: #e0e7ff !important;
+    color: #1e3a8a !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 6px rgba(30, 58, 138, 0.3) !important;
+}
+
+.stTabs [data-baseweb="tab-list"] button:focus {
+    outline: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+hide_streamlit_style = """
+    <style>
+    /* hamburger menu + footer + top decoration bar */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    [data-testid="stDecoration"] {display: none;}
+
+    /* the Share / Star / Fork / GitHub / Edit / Deploy buttons (Community Cloud) */
+    [data-testid="stToolbarActions"] {display: none;}
+
+    /* the "Hosted with Streamlit" / fork badge, if present */
+    .viewerBadge_link__qRIco {display: none;}
+    [data-testid="stStatusWidget"] {display: none;}
+
+    /* SAFETY NET: make sure the sidebar open/close control stays visible */
+    [data-testid="stSidebarCollapsedControl"] {visibility: visible !important; display: block !important;}
+    [data-testid="collapsedControl"] {visibility: visible !important; display: block !important;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 st.markdown("#### XRDlicious submodule:  Point Defects Creation on Uploaded Crystal Structures (CIF, LMP, POSCAR,  XYZ (with lattice) ...)")
+st.markdown(
+    """
+    <div style="
+        display: inline-block;
+        background-color: #ffffff;
+        border-left: 5px solid #2563eb;
+        border-radius: 10px;
+        padding: 10px 16px;
+        margin-top: -4px;
+        margin-bottom: 24px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.10);
+        color: #111827;
+        font-size: 0.95rem;
+        font-weight: 600;
+    ">
+        <span style="color:#2563eb; font-weight:800;">Release:</span>
+        v0.4.0 &nbsp; | &nbsp;
+        <span style="color:#2563eb; font-weight:800;">Updated:</span>
+        May 27, 2026
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <hr style="border: none; height: 6px; background-color: #3399ff; border-radius: 8px; margin: 20px 0;">
+    """,
+    unsafe_allow_html=True
+)
 col1_header, col2_header = st.columns([1.25, 1])
 with col2_header:
     st.info(
@@ -1486,17 +1607,17 @@ st.markdown(
 )
 
 
-st.sidebar.markdown('<div class="sidebar-caption">🍕 XRDlicious, point defects</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="sidebar-caption">XRDlicious, point defects</div>', unsafe_allow_html=True)
 
 
 
-st.sidebar.info(f"❤️🫶 **[Donations always appreciated!](https://buymeacoffee.com/bracerino)**")
+st.sidebar.info(f"🫶 **[Donations always appreciated!](https://buymeacoffee.com/bracerino)**")
 st.sidebar.info(
 "Try also the main application **[XRDlicious](https://xrdlicious.com)**. Spot a bug or have a feature requests? Let us know at **lebedmi2@cvut.cz**."
 " Consider to compile the app **locally** from **[GitHub](https://github.com/bracerino/GUI-point-defects)** for better performance."
 )
 
-st.sidebar.subheader("📁📤 Upload Your Structure Files")
+st.sidebar.subheader("📤 Upload Your Structure Files")
 uploaded_files_user_sidebar = st.sidebar.file_uploader(
     "Upload Structure Files (CIF, POSCAR, XSF, PW, CFG, ...):",
     type=None, accept_multiple_files=True, key="sidebar_uploader"
@@ -1928,6 +2049,12 @@ if st.session_state.uploaded_files:
                 st.rerun()
 
         if st.session_state.supercell_settings_applied and st.session_state.current_structure_before_defects:
+            st.markdown(
+                """
+                <hr style="border: none; height: 6px; background-color: #3399ff; border-radius: 8px; margin: 20px 0;">
+                """,
+                unsafe_allow_html=True
+            )
             st.markdown("### 3. Create Point Defects on the Applied Supercell")
             #if st.session_state.current_structure != st.session_state.current_structure_before_defects and not st.session_state.helpful:
             #    st.session_state.current_structure = st.session_state.current_structure_before_defects.copy()
@@ -2688,10 +2815,10 @@ if st.session_state.uploaded_files:
                             with sub_col2:
                                 sub_t_el = st.selectbox(
                                     f"Replace {el_s} with:",
-                                    options= ELEMENTS,
-                                    index=0,
+                                    options=['Vac'] + ELEMENTS,
+                                    index=1,
                                     key=f"sub_t_{el_s}",
-                                    help="Select substitute element"
+                                    help="Select substitute element. Choose 'Vac' to remove the selected atoms (create vacancies) instead of replacing them."
                                 )
 
                             sub_settings[el_s] = {"percentage": sub_p, "substitute": sub_t_el.strip()}
@@ -2708,8 +2835,12 @@ if st.session_state.uploaded_files:
                                     site.specie.symbol == orig_el_symbol)
                                 n_to_substitute = int(round(el_count_sub * perc_to_sub / 100.0))
                                 total_to_substitute += n_to_substitute
-                                preview_text_sub.append(
-                                    f"**{orig_el_symbol} → {sub_el_symbol}**: {n_to_substitute} atoms ({round(perc_to_sub,2)}%) of {el_count_sub}")
+                                if sub_el_symbol.lower() in ("vac", "vacancy"):
+                                    preview_text_sub.append(
+                                        f"**{orig_el_symbol} → Vacancy (removed)**: {n_to_substitute} atoms ({round(perc_to_sub,2)}%) of {el_count_sub}")
+                                else:
+                                    preview_text_sub.append(
+                                        f"**{orig_el_symbol} → {sub_el_symbol}**: {n_to_substitute} atoms ({round(perc_to_sub,2)}%) of {el_count_sub}")
 
                         if preview_text_sub:
                             for text in preview_text_sub:
@@ -2830,6 +2961,13 @@ if st.session_state.uploaded_files:
                     with batch_col1:
                         st.markdown("##### Generate Multiple Configurations")
 
+                        # Set by the Substitute/Vacancy range UI below when the user chooses
+                        # one or two elements to sweep. None => single-range (cluster) path.
+                        grid_vary = None
+                        defect_range = None
+                        # True when the planned total would exceed the online cap (see below).
+                        batch_over_limit = False
+
                         if operation_mode in ["Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]:
                             use_range_mode = st.checkbox(
                                 "Generate range of defect counts",
@@ -2879,208 +3017,200 @@ if st.session_state.uploaded_files:
                                 elif operation_mode == "Substitute Atoms":
                                     st.markdown("**Substitution Range:**")
 
-                                    elements_to_substitute = [el_s for el_s in sub_settings.keys()
-                                                              if sub_settings[el_s].get("percentage", 0) > 0]
+                                    configured_sub_els = [el_s for el_s in sub_settings.keys()
+                                                          if sub_settings[el_s].get("percentage", 0) > 0]
 
-                                    if not elements_to_substitute:
-                                        st.warning("Please configure substitution settings first (set percentage > 0)")
+                                    if not configured_sub_els:
+                                        st.warning("Please configure substitution settings first "
+                                                   "(set percentage > 0 for at least one element)")
                                         use_range_mode = False
                                     else:
-                                        substitution_pairs = []
-                                        for el in elements_to_substitute:
-                                            sub_el = sub_settings[el].get("substitute", "")
-                                            substitution_pairs.append(f"{el}→{sub_el}")
+                                        pairs = [f"{el}→{sub_settings[el].get('substitute', '')}"
+                                                 for el in configured_sub_els]
+                                        st.caption("Configured elements: " + ", ".join(pairs))
 
-                                        substitution_pairs = []
-                                        for el in elements_to_substitute:
-                                            sub_el = sub_settings[el].get("substitute", "")
-                                            substitution_pairs.append(f"{el}→{sub_el}")
-
-                                        st.info(f"Will vary substitution of **{', '.join(substitution_pairs)}**")
-
-                                        range_mode = st.radio(
-                                            "Range mode",
-                                            options=["Percentage", "Number of atoms"],
-                                            key="sub_range_mode",
-                                            horizontal=True
+                                        vary_elements = st.multiselect(
+                                            "Element(s) to vary in concentration (choose 1 or 2)",
+                                            options=configured_sub_els,
+                                            default=configured_sub_els[:1],
+                                            key="sub_vary_elements",
+                                            help="Selected elements have their concentration swept over a range. Other "
+                                                 "configured elements stay fixed at their set value. Choosing 2 elements "
+                                                 "creates a nested folder grid (element 1 fixed per outer folder, "
+                                                 "element 2 varied in subfolders)."
                                         )
 
-                                        if range_mode == "Percentage":
-                                            min_value = st.number_input(
-                                                "Min %",
-                                                min_value=0.01,
-                                                max_value=100.0,
-                                                value=1.0,
-                                                step=0.5,
-                                                key="min_sub_perc"
-                                            )
-
-                                            max_value = st.number_input(
-                                                "Max %",
-                                                min_value=min_value,
-                                                max_value=100.0,
-                                                value=max(min_value, 10.0),
-                                                step=0.5,
-                                                key="max_sub_perc"
-                                            )
-
-                                            step_value = st.number_input(
-                                                "Step %",
-                                                min_value=0.01,
-                                                max_value=max(0.01, max_value - min_value),
-                                                value=min(1.0, max(0.01, max_value - min_value)),
-                                                step=0.1,
-                                                key="step_sub_perc"
-                                            )
-
-                                            defect_range = [round(x, 2) for x in
-                                                            np.arange(min_value, max_value + step_value / 2,
-                                                                      step_value)]
-                                            range_label = "percent"
-                                            range_mode = "percentage"
+                                        if len(vary_elements) == 0:
+                                            st.warning("Select at least one element to vary.")
+                                            use_range_mode = False
+                                        elif len(vary_elements) > 2:
+                                            st.warning("Please select at most 2 elements to vary.")
+                                            use_range_mode = False
                                         else:
-                                            element_counts = [sum(1 for site in active_pmg_for_defects.sites
-                                                                  if site.specie.symbol == el)
-                                                              for el in elements_to_substitute]
-                                            min_available = min(element_counts)
+                                            fixed_els = [el for el in configured_sub_els if el not in vary_elements]
+                                            if fixed_els:
+                                                st.info("Held fixed: " + ", ".join(
+                                                    f"{el} @ {sub_settings[el]['percentage']:.2f}%" for el in fixed_els))
 
-                                            st.info(
-                                                f"Maximum atoms available: {min_available} (limited by element with fewest atoms)")
+                                            vary_ranges = {}
+                                            vary_tabs = st.tabs([f"Vary: {el}" for el in vary_elements])
+                                            for el, vtab in zip(vary_elements, vary_tabs):
+                                                with vtab:
+                                                    el_count = sum(1 for site in active_pmg_for_defects.sites
+                                                                   if site.specie.symbol == el)
+                                                    unit = st.radio(
+                                                        "Range unit", ["Percentage", "Number of atoms"],
+                                                        key=f"sub_vary_unit_{el}", horizontal=True)
+                                                    if unit == "Percentage":
+                                                        mn = st.number_input("Min %", 0.01, 100.0, 1.0, 0.5,
+                                                                             key=f"sub_vary_min_perc_{el}")
+                                                        mx = st.number_input("Max %", mn, 100.0, max(mn, 10.0), 0.5,
+                                                                             key=f"sub_vary_max_perc_{el}")
+                                                        stp = st.number_input("Step %", 0.01, max(0.01, mx - mn),
+                                                                              min(1.0, max(0.01, mx - mn)), 0.1,
+                                                                              key=f"sub_vary_step_perc_{el}")
+                                                        vals = [round(x, 2) for x in
+                                                                np.arange(mn, mx + stp / 2, stp)]
+                                                        vary_ranges[el] = {"unit": "percentage", "values": vals,
+                                                                           "count": el_count}
+                                                    else:
+                                                        st.caption(f"{el}: {el_count} atoms available")
+                                                        mn = st.number_input("Min atoms", 1, el_count, 1, 1,
+                                                                             key=f"sub_vary_min_at_{el}")
+                                                        mx = st.number_input("Max atoms", mn, el_count,
+                                                                             max(mn, min(10, el_count)), 1,
+                                                                             key=f"sub_vary_max_at_{el}")
+                                                        stp = st.number_input("Step", 1, max(1, mx - mn),
+                                                                              min(1, max(1, mx - mn)), 1,
+                                                                              key=f"sub_vary_step_at_{el}")
+                                                        vals = list(range(mn, mx + 1, stp))
+                                                        vary_ranges[el] = {"unit": "count", "values": vals,
+                                                                           "count": el_count}
+                                                    st.caption(f"{el} → {len(vary_ranges[el]['values'])} values: "
+                                                               f"{vary_ranges[el]['values']}")
 
-                                            min_atoms = st.number_input(
-                                                "Min atoms",
-                                                min_value=1,
-                                                max_value=min_available,
-                                                value=1,
-                                                step=1,
-                                                key="min_sub_atoms"
-                                            )
-
-                                            max_atoms = st.number_input(
-                                                "Max atoms",
-                                                min_value=min_atoms,
-                                                max_value=min_available,
-                                                value=max(min_atoms, min(10, min_available)),
-                                                step=1,
-                                                key="max_sub_atoms"
-                                            )
-
-                                            step_atoms = st.number_input(
-                                                "Step",
-                                                min_value=1,
-                                                max_value=max(1, max_atoms - min_atoms),
-                                                value=min(1, max(1, max_atoms - min_atoms)),
-                                                step=1,
-                                                key="step_sub_atoms"
-                                            )
-
-                                            defect_range = list(range(min_atoms, max_atoms + 1, step_atoms))
-                                            range_label = "atoms"
-                                            range_mode = "count"
+                                            grid_vary = {"op": "substitute", "elements": list(vary_elements),
+                                                         "ranges": vary_ranges}
                                 elif operation_mode == "Create Vacancies":
                                     st.markdown("**Vacancy Range:**")
 
-                                    selected_vac_element = None
-                                    for el_v in vac_percent.keys():
-                                        if vac_percent[el_v] > 0:
-                                            selected_vac_element = el_v
-                                            break
+                                    configured_vac_els = [el_v for el_v in vac_percent.keys()
+                                                          if vac_percent[el_v] > 0]
 
-                                    if not selected_vac_element:
-                                        st.warning("Please configure vacancy settings first (set percentage > 0)")
+                                    if not configured_vac_els:
+                                        st.warning("Please configure vacancy settings first "
+                                                   "(set percentage > 0 for at least one element)")
                                         use_range_mode = False
                                     else:
-                                        range_mode = st.radio(
-                                            "Range mode",
-                                            options=["Percentage", "Number of atoms"],
-                                            key="vac_range_mode",
-                                            horizontal=True
+                                        st.caption("Configured elements: " + ", ".join(
+                                            f"{el} @ {vac_percent[el]:.2f}%" for el in configured_vac_els))
+
+                                        vary_elements = st.multiselect(
+                                            "Element(s) to vary in concentration (choose 1 or 2)",
+                                            options=configured_vac_els,
+                                            default=configured_vac_els[:1],
+                                            key="vac_vary_elements",
+                                            help="Selected elements have their vacancy concentration swept over a range. "
+                                                 "Other configured elements stay fixed at their set value. Choosing 2 "
+                                                 "elements creates a nested folder grid (element 1 fixed per outer "
+                                                 "folder, element 2 varied in subfolders)."
                                         )
 
-                                        if range_mode == "Percentage":
-                                            min_value = st.number_input(
-                                                "Min %",
-                                                min_value=0.01,
-                                                max_value=100.0,
-                                                value=1.0,
-                                                step=0.5,
-                                                key="min_vac_perc"
-                                            )
-
-                                            max_value = st.number_input(
-                                                "Max %",
-                                                min_value=min_value,
-                                                max_value=100.0,
-                                                value=max(min_value, 10.0),
-                                                step=0.5,
-                                                key="max_vac_perc"
-                                            )
-
-                                            step_value = st.number_input(
-                                                "Step %",
-                                                min_value=0.01,
-                                                max_value=max(0.01, max_value - min_value),
-                                                value=min(1.0, max(0.01, max_value - min_value)),
-                                                step=0.1,
-                                                key="step_vac_perc"
-                                            )
-
-                                            defect_range = [round(x, 2) for x in
-                                                            np.arange(min_value, max_value + step_value / 2,
-                                                                      step_value)]
-                                            range_label = "percent"
-                                            range_mode = "percentage"
+                                        if len(vary_elements) == 0:
+                                            st.warning("Select at least one element to vary.")
+                                            use_range_mode = False
+                                        elif len(vary_elements) > 2:
+                                            st.warning("Please select at most 2 elements to vary.")
+                                            use_range_mode = False
                                         else:
-                                            element_count = sum(1 for site in active_pmg_for_defects.sites if
-                                                                site.specie.symbol == selected_vac_element)
+                                            fixed_els = [el for el in configured_vac_els if el not in vary_elements]
+                                            if fixed_els:
+                                                st.info("Held fixed: " + ", ".join(
+                                                    f"{el} @ {vac_percent[el]:.2f}%" for el in fixed_els))
 
-                                            min_atoms = st.number_input(
-                                                "Min atoms",
-                                                min_value=1,
-                                                max_value=element_count,
-                                                value=1,
-                                                step=1,
-                                                key="min_vac_atoms"
-                                            )
+                                            vary_ranges = {}
+                                            vary_tabs = st.tabs([f"Vary: {el}" for el in vary_elements])
+                                            for el, vtab in zip(vary_elements, vary_tabs):
+                                                with vtab:
+                                                    el_count = sum(1 for site in active_pmg_for_defects.sites
+                                                                   if site.specie.symbol == el)
+                                                    unit = st.radio(
+                                                        "Range unit", ["Percentage", "Number of atoms"],
+                                                        key=f"vac_vary_unit_{el}", horizontal=True)
+                                                    if unit == "Percentage":
+                                                        mn = st.number_input("Min %", 0.01, 100.0, 1.0, 0.5,
+                                                                             key=f"vac_vary_min_perc_{el}")
+                                                        mx = st.number_input("Max %", mn, 100.0, max(mn, 10.0), 0.5,
+                                                                             key=f"vac_vary_max_perc_{el}")
+                                                        stp = st.number_input("Step %", 0.01, max(0.01, mx - mn),
+                                                                              min(1.0, max(0.01, mx - mn)), 0.1,
+                                                                              key=f"vac_vary_step_perc_{el}")
+                                                        vals = [round(x, 2) for x in
+                                                                np.arange(mn, mx + stp / 2, stp)]
+                                                        vary_ranges[el] = {"unit": "percentage", "values": vals,
+                                                                           "count": el_count}
+                                                    else:
+                                                        st.caption(f"{el}: {el_count} atoms available")
+                                                        mn = st.number_input("Min atoms", 1, el_count, 1, 1,
+                                                                             key=f"vac_vary_min_at_{el}")
+                                                        mx = st.number_input("Max atoms", mn, el_count,
+                                                                             max(mn, min(10, el_count)), 1,
+                                                                             key=f"vac_vary_max_at_{el}")
+                                                        stp = st.number_input("Step", 1, max(1, mx - mn),
+                                                                              min(1, max(1, mx - mn)), 1,
+                                                                              key=f"vac_vary_step_at_{el}")
+                                                        vals = list(range(mn, mx + 1, stp))
+                                                        vary_ranges[el] = {"unit": "count", "values": vals,
+                                                                           "count": el_count}
+                                                    st.caption(f"{el} → {len(vary_ranges[el]['values'])} values: "
+                                                               f"{vary_ranges[el]['values']}")
 
-                                            max_atoms = st.number_input(
-                                                "Max atoms",
-                                                min_value=min_atoms,
-                                                max_value=element_count,
-                                                value=max(min_atoms, min(10, element_count)),
-                                                step=1,
-                                                key="max_vac_atoms"
-                                            )
+                                            grid_vary = {"op": "vacancy", "elements": list(vary_elements),
+                                                         "ranges": vary_ranges}
 
-                                            step_atoms = st.number_input(
-                                                "Step",
-                                                min_value=1,
-                                                max_value=max(1, max_atoms - min_atoms),
-                                                value=min(1, max(1, max_atoms - min_atoms)),
-                                                step=1,
-                                                key="step_vac_atoms"
-                                            )
-
-                                            defect_range = list(range(min_atoms, max_atoms + 1, step_atoms))
-                                            range_label = "atoms"
-                                            range_mode = "count"
-
-                                        st.info(f"Will vary vacancies of **{selected_vac_element}**")
-
-                                if use_range_mode and 'defect_range' in locals():
+                                if use_range_mode and (grid_vary is not None or defect_range is not None):
                                     configs_per_count = st.number_input(
-                                        "Configurations per value",
+                                        "Configurations per concentration",
                                         min_value=1,
-                                        max_value=1000,
+                                        max_value=MAX_CONFIGS_PER_CONCENTRATION,
                                         value=10,
                                         step=1,
                                         key="configs_per_count",
-                                        help="How many structures to generate for each defect count"
+                                        help=f"How many random structures to generate for each concentration value "
+                                             f"(max {MAX_CONFIGS_PER_CONCENTRATION} "
+                                             f"{'locally' if _running_locally() else 'online'})"
                                     )
 
-                                    total_configs = len(defect_range) * configs_per_count
-                                    st.info(
-                                        f"Will generate: {defect_range} ({len(defect_range)} values × {configs_per_count} configs = {total_configs} total)")
+                                    if grid_vary is not None:
+                                        n_points = 1
+                                        for _el in grid_vary["elements"]:
+                                            n_points *= len(grid_vary["ranges"][_el]["values"])
+                                        total_configs = n_points * configs_per_count
+                                        if len(grid_vary["elements"]) == 2:
+                                            e1, e2 = grid_vary["elements"]
+                                            n1 = len(grid_vary["ranges"][e1]["values"])
+                                            n2 = len(grid_vary["ranges"][e2]["values"])
+                                            st.info(
+                                                f"Nested grid: **{e1}** ({n1} values) × **{e2}** ({n2} values) × "
+                                                f"{configs_per_count} configs = **{total_configs}** structures "
+                                                f"({n1} folders, each with {n2} subfolders).")
+                                        else:
+                                            e1 = grid_vary["elements"][0]
+                                            st.info(
+                                                f"Varying **{e1}** over {n_points} values × {configs_per_count} "
+                                                f"configs = **{total_configs}** structures.")
+                                    else:
+                                        total_configs = len(defect_range) * configs_per_count
+                                        st.info(
+                                            f"Will generate: {defect_range} ({len(defect_range)} values × "
+                                            f"{configs_per_count} configs = {total_configs} total)")
+
+                                    if MAX_TOTAL_CONFIGS is not None and total_configs > MAX_TOTAL_CONFIGS:
+                                        batch_over_limit = True
+                                        st.error(
+                                            f"⚠️ {total_configs} total structures exceeds the online limit of "
+                                            f"{MAX_TOTAL_CONFIGS}. Reduce the ranges (fewer values) or the "
+                                            f"configurations per concentration, or run the app locally for no limit.")
                             else:
                                 n_configurations = st.number_input("Number of configurations", 1, 500, 10, 1,
                                                                    key="n_configs")
@@ -3093,13 +3223,112 @@ if st.session_state.uploaded_files:
                         if st.button("🎲 Generate Multiple Defect Configurations", key="generate_batch_btn",
                                      type='primary'):
                             if st.session_state.current_structure_before_defects:
+                                _range_active = st.session_state.get('use_range_mode', False) and operation_mode in [
+                                    "Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]
 
-                                if st.session_state.get('use_range_mode', False) and operation_mode in [
-                                    "Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]:
+                                if _range_active and batch_over_limit:
+                                    st.error(
+                                        f"Cannot generate {total_configs} structures: this exceeds the online "
+                                        f"limit of {MAX_TOTAL_CONFIGS}. Reduce the ranges or the configurations "
+                                        f"per concentration, or run the app locally for no limit.")
+
+                                elif _range_active and grid_vary is None and defect_range is None:
+                                    st.error("Please finish the range settings (select element(s) to vary and set "
+                                             "their min/max/step) before generating.")
+
+                                elif _range_active and grid_vary is not None:
+                                    # ---- Nested concentration grid (Substitute Atoms / Create Vacancies) ----
+                                    import itertools
+                                    grid_elems = grid_vary["elements"]
+                                    grid_rngs = grid_vary["ranges"]
+                                    grid_value_lists = [grid_rngs[_e]["values"] for _e in grid_elems]
+                                    grid_combos = list(itertools.product(*grid_value_lists))
+                                    total_configs = len(grid_combos) * configs_per_count
+                                    with st.spinner(f"Generating {total_configs} configurations..."):
+                                        st.session_state.generated_structures = {}
+                                        config_counter = 0
+                                        progress_bar = st.progress(0.0)
+                                        status_text = st.empty()
+                                        update_every = max(1, total_configs // 100)
+
+                                        for combo in grid_combos:
+                                            path_parts = []
+                                            for _e, _v in zip(grid_elems, combo):
+                                                if grid_rngs[_e]["unit"] == "percentage":
+                                                    path_parts.append(f"{_e}_{_v:.2f}perc")
+                                                else:
+                                                    path_parts.append(f"{_e}_{int(_v)}atoms")
+                                            folder = "/".join(path_parts)
+
+                                            for rep in range(configs_per_count):
+                                                seed = starting_seed + config_counter
+                                                base_struct = st.session_state.current_structure_before_defects.copy()
+
+                                                if grid_vary["op"] == "substitute":
+                                                    modified_sub_settings = {}
+                                                    for el_s in sub_settings.keys():
+                                                        sub_el_target = sub_settings[el_s].get("substitute", "")
+                                                        if el_s in grid_elems:
+                                                            _v = combo[grid_elems.index(el_s)]
+                                                            if grid_rngs[el_s]["unit"] == "count":
+                                                                _cnt = grid_rngs[el_s]["count"]
+                                                                _pct = (_v / _cnt * 100) if _cnt > 0 else 0
+                                                            else:
+                                                                _pct = _v
+                                                            modified_sub_settings[el_s] = {
+                                                                "percentage": _pct, "substitute": sub_el_target}
+                                                        elif sub_settings[el_s].get("percentage", 0) > 0:
+                                                            modified_sub_settings[el_s] = {
+                                                                "percentage": sub_settings[el_s]["percentage"],
+                                                                "substitute": sub_el_target}
+                                                        else:
+                                                            modified_sub_settings[el_s] = {
+                                                                "percentage": 0, "substitute": sub_el_target}
+                                                    modified_struct = substitute_atoms_in_structure(
+                                                        base_struct, modified_sub_settings, sub_mode, sub_target,
+                                                        None, seed)
+                                                else:  # vacancy
+                                                    modified_vac_percent = {}
+                                                    for el_v in vac_percent.keys():
+                                                        if el_v in grid_elems:
+                                                            _v = combo[grid_elems.index(el_v)]
+                                                            if grid_rngs[el_v]["unit"] == "count":
+                                                                _cnt = grid_rngs[el_v]["count"]
+                                                                _pct = (_v / _cnt * 100) if _cnt > 0 else 0
+                                                            else:
+                                                                _pct = _v
+                                                            modified_vac_percent[el_v] = _pct
+                                                        elif vac_percent[el_v] > 0:
+                                                            modified_vac_percent[el_v] = vac_percent[el_v]
+                                                        else:
+                                                            modified_vac_percent[el_v] = 0
+                                                    modified_struct = remove_vacancies_from_structure(
+                                                        base_struct, modified_vac_percent, vac_mode, vac_target,
+                                                        None, seed)
+
+                                                config_name = f"{folder}/config_rep{rep + 1:02d}_seed{seed}"
+                                                st.session_state.generated_structures[config_name] = modified_struct
+                                                config_counter += 1
+                                                if config_counter % update_every == 0 or config_counter == total_configs:
+                                                    progress_bar.progress(config_counter / total_configs)
+                                                    status_text.info(
+                                                        f"Generated {config_counter} / {total_configs} "
+                                                        f"({total_configs - config_counter} remaining)")
+
+                                        progress_bar.empty()
+                                        status_text.empty()
+                                        st.success(
+                                            f"Generated {len(st.session_state.generated_structures)} configurations "
+                                            f"across {len(grid_combos)} concentration combination(s)!")
+
+                                elif _range_active:
                                     total_configs = len(defect_range) * configs_per_count
                                     with st.spinner(f"Generating {total_configs} configurations..."):
                                         st.session_state.generated_structures = {}
                                         config_counter = 0
+                                        progress_bar = st.progress(0.0)
+                                        status_text = st.empty()
+                                        update_every = max(1, total_configs // 100)
 
                                         for defect_value in defect_range:
                                             for rep in range(configs_per_count):
@@ -3210,12 +3439,22 @@ if st.session_state.uploaded_files:
 
                                                 st.session_state.generated_structures[config_name] = modified_struct
                                                 config_counter += 1
+                                                if config_counter % update_every == 0 or config_counter == total_configs:
+                                                    progress_bar.progress(config_counter / total_configs)
+                                                    status_text.info(
+                                                        f"Generated {config_counter} / {total_configs} "
+                                                        f"({total_configs - config_counter} remaining)")
 
+                                        progress_bar.empty()
+                                        status_text.empty()
                                         st.success(
                                             f"Generated {len(st.session_state.generated_structures)} configurations with varying defect counts!")
                                 else:
                                     with st.spinner(f"Generating {n_configurations} configurations..."):
                                         st.session_state.generated_structures = {}
+                                        progress_bar = st.progress(0.0)
+                                        status_text = st.empty()
+                                        update_every = max(1, n_configurations // 100)
 
                                         for i in range(n_configurations):
                                             seed = starting_seed + i
@@ -3376,11 +3615,99 @@ if st.session_state.uploaded_files:
                                                         modified_struct = base_struct
 
                                             st.session_state.generated_structures[config_name] = modified_struct
+                                            if (i + 1) % update_every == 0 or (i + 1) == n_configurations:
+                                                progress_bar.progress((i + 1) / n_configurations)
+                                                status_text.info(
+                                                    f"Generated {i + 1} / {n_configurations} "
+                                                    f"({n_configurations - (i + 1)} remaining)")
 
+                                        progress_bar.empty()
+                                        status_text.empty()
                                         st.success(
                                             f"Generated {len(st.session_state.generated_structures)} configurations!")
                             else:
                                 st.error("No supercell structure available. Apply supercell first.")
+
+                        _script_supported = grid_vary is not None or (
+                                operation_mode == "Create Substitution Cluster" and defect_range is not None)
+                        if _script_supported:
+                            if batch_over_limit:
+                                st.markdown("###### ⬇️ Generate locally instead")
+                                st.caption(
+                                    f"This batch ({total_configs} structures) exceeds the online limit of "
+                                    f"{MAX_TOTAL_CONFIGS}, so in-app generation is disabled here. Download a "
+                                    f"standalone Python script and run it on your own machine to create all of them.")
+                            else:
+                                st.markdown("###### 🐍 Reproducible / local generation")
+                                st.caption(
+                                    f"Optional: download a standalone Python script that regenerates all "
+                                    f"{total_configs} structures locally — handy for large batches or for keeping "
+                                    f"a reproducible record of this run.")
+
+                            _fmt_options = ["CIF", "VASP", "LAMMPS", "XYZ"]
+                            _default_fmt = st.session_state.get("batch_format", "CIF")
+                            script_output_format = st.selectbox(
+                                "Output file format for the script",
+                                _fmt_options,
+                                index=_fmt_options.index(_default_fmt) if _default_fmt in _fmt_options else 0,
+                                key="script_output_format",
+                                help="File format the standalone script will write for each generated structure.",
+                            )
+                            try:
+                                cluster_params = None
+                                if operation_mode == "Create Substitution Cluster":
+                                    cluster_params = {
+                                        "orig_el": st.session_state.get('cluster_orig_el'),
+                                        "sub_el": st.session_state.get('cluster_sub_el'),
+                                        "shape": st.session_state.get('cluster_shape', 'Spherical'),
+                                        "radius": st.session_state.get('cluster_radius_input'),
+                                        "block": [st.session_state.get('cluster_block_x'),
+                                                  st.session_state.get('cluster_block_y'),
+                                                  st.session_state.get('cluster_block_z')],
+                                        "delete_others": st.session_state.get('delete_other_orig_el_cluster', False),
+                                        "counts": list(defect_range) if defect_range is not None else [],
+                                    }
+                                script_text = build_batch_script(
+                                    operation_mode=operation_mode,
+                                    base_structure=st.session_state.current_structure_before_defects,
+                                    total_configs=total_configs,
+                                    configs_per_count=configs_per_count,
+                                    starting_seed=starting_seed,
+                                    output_format=script_output_format,
+                                    lammps_atom_style=st.session_state.get("batch_atom_style", "atomic"),
+                                    lammps_units=st.session_state.get("batch_units", "metal"),
+                                    grid_vary=grid_vary,
+                                    sub_settings=sub_settings if operation_mode == "Substitute Atoms" else None,
+                                    sub_mode=sub_mode if operation_mode == "Substitute Atoms" else "random",
+                                    sub_target=sub_target if operation_mode == "Substitute Atoms" else 0.5,
+                                    vac_percent=vac_percent if operation_mode == "Create Vacancies" else None,
+                                    vac_mode=vac_mode if operation_mode == "Create Vacancies" else "random",
+                                    vac_target=vac_target if operation_mode == "Create Vacancies" else 0.5,
+                                    cluster_params=cluster_params,
+                                    point_selection_algorithm=st.session_state.get(
+                                        'point_selection_algorithm', 'original'),
+                                )
+                                with st.expander("🐍 Show standalone Python script (generate locally)"):
+                                    st.markdown(
+                                        "Save the code below as `generate_defects.py` anywhere, then run it in a "
+                                        "Python environment with `numpy`, `scipy`, `pymatgen` and `ase` installed:\n"
+                                        "```bash\npython generate_defects.py\n```\n"
+                                        "The defect routines are embedded in the script, so it is fully "
+                                        "self-contained (no app files needed). All structures are written under "
+                                        "`generated_structures/` with the same nested folders per concentration. "
+                                        "The output format follows the **Output file format** selected above (you "
+                                        "can also edit the `OUTPUT_FORMAT` constant at the top of the script).")
+                                    st.download_button(
+                                        "🐍 Download Python script (generate locally)",
+                                        data=script_text,
+                                        file_name="generate_defects.py",
+                                        mime="text/x-python",
+                                        key="download_gen_script",
+                                        type="primary",
+                                    )
+                                    st.code(script_text, language="python")
+                            except Exception as e:
+                                st.warning(f"Could not build the script: {e}")
 
                     with batch_col2:
                         st.markdown("##### Batch Download")
@@ -3738,6 +4065,7 @@ if st.session_state.uploaded_files:
                             changed = False
                     st.session_state.current_structure = mod_struct
                     st.session_state.helpful = changed
+                    print(f"{operation_mode} applied. Resulting structure {get_structure_info(mod_struct)}")
                     with col_defect_log:
                         col_defect_log.success(
                             "Defect op applied." if changed else "Defect op finished (structure may be unchanged).")
@@ -3764,8 +4092,12 @@ if st.session_state.uploaded_files:
             st.warning(
                 "Supercell not yet applied. Please apply supercell dimensions in Step 2 before creating defects.")
 
-        st.markdown("---")
-        st.markdown("---")
+        st.markdown(
+            """
+            <hr style="border: none; height: 6px; background-color: #3399ff; border-radius: 8px; margin: 20px 0;">
+            """,
+            unsafe_allow_html=True
+        )
         st.markdown("### 🔬 Structure Visualization & Download")
         pmg_to_visualize = st.session_state.current_structure
         if pmg_to_visualize:
@@ -3817,7 +4149,7 @@ if st.session_state.uploaded_files:
                         view.zoomTo()
                         view.zoom(1.1)
                         html_viz = view._make_html()
-                        st.components.v1.html(
+                        st.iframe(
                             f"<div style='display:flex;justify-content:center;border:1px solid #e0e0e0;border-radius:5px;overflow:hidden;min-height:510px;'>{html_viz}</div>",
                             height=520)
 
@@ -4123,5 +4455,5 @@ st.markdown("""
 
 This project uses several open-source tools and datasets. We gratefully acknowledge their authors: **[Matminer](https://github.com/hackingmaterials/matminer)** Licensed under the [Modified BSD License](https://github.com/hackingmaterials/matminer/blob/main/LICENSE). **[Pymatgen](https://github.com/materialsproject/pymatgen)** Licensed under the [MIT License](https://github.com/materialsproject/pymatgen/blob/master/LICENSE).
  **[ASE (Atomic Simulation Environment)](https://gitlab.com/ase/ase)** Licensed under the [GNU Lesser General Public License (LGPL)](https://gitlab.com/ase/ase/-/blob/master/COPYING.LESSER). **[Py3DMol](https://github.com/avirshup/py3dmol/tree/master)** Licensed under the [BSD-style License](https://github.com/avirshup/py3dmol/blob/master/LICENSE.txt). **[Materials Project](https://next-gen.materialsproject.org/)** Data from the Materials Project is made available under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). **[AFLOW](http://aflow.org)** Licensed under the [GNU General Public License (GPL)](https://www.gnu.org/licenses/gpl-3.0.html)
- **[Crystallographic Open Database (COD)](https://www.crystallography.net/cod/)** under the CC0 license.
+ **[Crystallography Open Database (COD)](https://www.crystallography.net/cod/)** under the CC0 license.
 """)
