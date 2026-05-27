@@ -7,7 +7,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from ase.io import read, write
-from matminer.featurizers.structure import PartialRadialDistributionFunction
 import numpy as np
 from ase.io import write
 from scipy.spatial import cKDTree
@@ -2609,7 +2608,6 @@ def select_spaced_points_original(frac_coords_list, n_points, mode, target_value
 import numpy as np
 from scipy.spatial.distance import cdist
 from scipy.spatial import cKDTree
-from sklearn.cluster import KMeans
 import random
 from typing import List, Tuple, Optional
 
@@ -2656,6 +2654,7 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
     if n_available <= n_points:
         return frac_coords_list.copy(), list(range(n_available))
     if n_available > 50000:
+        from sklearn.cluster import KMeans
         n_clusters = min(n_points * 10, n_available // 10)
         kmeans = KMeans(n_clusters=n_clusters, random_state=random_seed, n_init=10)
         cluster_labels = kmeans.fit_predict(frac_coords_array)
@@ -2775,7 +2774,7 @@ def select_spaced_points_fast_kdtree(frac_coords_list, n_points, mode,
     else:  # moderate
 
         if n_available > 1000:
-
+            from sklearn.cluster import KMeans
             kmeans = KMeans(n_clusters=n_points, random_state=random_seed, n_init=10)
             cluster_labels = kmeans.fit_predict(frac_coords_array)
             cluster_centers = kmeans.cluster_centers_
@@ -2914,7 +2913,7 @@ def insert_interstitials_ase_fast_optimized_v2(structure_obj, interstitial_eleme
         ase_atoms = AseAtomsAdaptor.get_atoms(structure_obj)
         cell = ase_atoms.get_cell()
         positions = ase_atoms.get_positions()
-        cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
+        cell_lengths = ase_atoms.cell.cellpar()[:3]
 
         n_atoms = len(structure_obj)
         if n_atoms > 10000:
@@ -3119,7 +3118,7 @@ def insert_interstitials_adaptive_grid(structure_obj, interstitial_element, n_in
         ase_atoms = AseAtomsAdaptor.get_atoms(structure_obj)
         cell = ase_atoms.get_cell()
         positions = ase_atoms.get_positions()
-        cell_lengths = ase_atoms.get_cell_lengths_and_angles()[:3]
+        cell_lengths = ase_atoms.cell.cellpar()[:3]
 
         grid_spacings = [initial_grid_spacing * 2, initial_grid_spacing, initial_grid_spacing * 0.7]
 
@@ -3338,16 +3337,20 @@ def substitute_atoms_in_structure(structure_obj, substitution_settings_dict, sel
     new_species_list = [site.species for site in structure_obj.sites]
     new_coords_list = [site.frac_coords for site in structure_obj.sites]
     modified_indices_count = 0
+    indices_to_remove = []  # Sites selected for vacancy creation (substitute == 'Vac')
     for orig_el_symbol, settings in substitution_settings_dict.items():
         perc_to_sub = settings.get("percentage", 0)
         sub_el_symbol = settings.get("substitute", "").strip()
         if perc_to_sub <= 0 or not sub_el_symbol: continue
-        try:
-            sub_element = Element(sub_el_symbol)
-        except Exception:
-            if log_area: log_area.warning(
-                f"  Invalid substitute element symbol: '{sub_el_symbol}'. Skipping for {orig_el_symbol}.")
-            continue
+        is_vacancy = sub_el_symbol.lower() in ("vac", "vacancy")
+        sub_element = None
+        if not is_vacancy:
+            try:
+                sub_element = Element(sub_el_symbol)
+            except Exception:
+                if log_area: log_area.warning(
+                    f"  Invalid substitute element symbol: '{sub_el_symbol}'. Skipping for {orig_el_symbol}.")
+                continue
         orig_el_indices_in_struct = [i for i, site in enumerate(structure_obj.sites) if
                                      site.specie and site.specie.symbol == orig_el_symbol]
         n_sites_of_orig_el = len(orig_el_indices_in_struct)
@@ -3369,14 +3372,26 @@ def substitute_atoms_in_structure(structure_obj, substitution_settings_dict, sel
         global_indices_for_this_el_substitution = [orig_el_indices_in_struct[i] for i in
                                                    selected_local_indices_for_substitution]
         for global_idx_to_sub in global_indices_for_this_el_substitution:
-            new_species_list[global_idx_to_sub] = sub_element
+            if is_vacancy:
+                indices_to_remove.append(global_idx_to_sub)
+            else:
+                new_species_list[global_idx_to_sub] = sub_element
             modified_indices_count += 1
-        if log_area: log_area.write(
-            f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for substitution with {sub_el_symbol}.")
+        if is_vacancy:
+            if log_area: log_area.write(
+                f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for vacancy creation (removal).")
+        else:
+            if log_area: log_area.write(
+                f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for substitution with {sub_el_symbol}.")
     if modified_indices_count > 0:
         final_substituted_structure = Structure(lattice=structure_obj.lattice, species=new_species_list,
                                                 coords=new_coords_list, coords_are_cartesian=False)
-        if log_area: log_area.info(f"Attempted to substitute {modified_indices_count} atoms in total.")
+        if indices_to_remove:
+            unique_indices_to_remove = sorted(list(set(indices_to_remove)), reverse=True)
+            final_substituted_structure.remove_sites(unique_indices_to_remove)
+            if log_area: log_area.info(
+                f"Removed {len(unique_indices_to_remove)} atoms as vacancies (substitute = 'Vac').")
+        if log_area: log_area.info(f"Attempted to modify {modified_indices_count} atoms in total.")
         return final_substituted_structure
     else:
         if log_area: log_area.info("No atoms were selected for substitution.")
@@ -3388,7 +3403,7 @@ def get_orthogonal_cell(structure, max_atoms=200):
 
     from pymatgen.io.ase import AseAtomsAdaptor
     ase_atoms = AseAtomsAdaptor.get_atoms(structure)
-    angles = ase_atoms.get_cell_lengths_and_angles()[3:]
+    angles = ase_atoms.cell.cellpar()[3:]
     if all(abs(angle - 90.0) < 1e-6 for angle in angles):
         return structure.copy()
 
@@ -3421,7 +3436,7 @@ def get_orthogonal_cell(structure, max_atoms=200):
                     test_structure = sc_transformer.apply_transformation(structure)
 
                     ase_test = AseAtomsAdaptor.get_atoms(test_structure)
-                    test_angles = ase_test.get_cell_lengths_and_angles()[3:]
+                    test_angles = ase_test.cell.cellpar()[3:]
 
                     if all(abs(angle - 90.0) < 5.0 for angle in test_angles):
                         return test_structure
@@ -3441,7 +3456,7 @@ def get_structure_info(structure):
 
     atom_count = len(structure)
     ase_atoms = AseAtomsAdaptor.get_atoms(structure)
-    cell_params = ase_atoms.get_cell_lengths_and_angles()
+    cell_params = ase_atoms.cell.cellpar()
     volume = ase_atoms.get_volume()
 
     info_text = f"(**{atom_count} atoms)**\n"
