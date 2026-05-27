@@ -2071,7 +2071,8 @@ if st.session_state.uploaded_files:
                 current_defect_op_options = defect_ops
                 if atom_count_defects > defect_op_limit:
                     st.warning(
-                        f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}).")
+                        f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}). "
+                        f"For interstitials, use grid method instead.")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
                                                  "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster",
                                                  "Swap Nearest Elements","Create Compressed Bubble"]
@@ -3210,7 +3211,8 @@ if st.session_state.uploaded_files:
                                         st.error(
                                             f"⚠️ {total_configs} total structures exceeds the online limit of "
                                             f"{MAX_TOTAL_CONFIGS}. Reduce the ranges (fewer values) or the "
-                                            f"configurations per concentration, or run the app locally for no limit.")
+                                            f"configurations per concentration, run the app locally for no limit, "
+                                            f"or use the standalone Python script below to generate them all locally.")
                             else:
                                 n_configurations = st.number_input("Number of configurations", 1, 500, 10, 1,
                                                                    key="n_configs")
