@@ -285,5 +285,5 @@ def render_format_converter_ui(main_structures_dict=None):
             mime="application/zip",
             type="primary",
             key="conv_download_zip",
-            use_container_width=True
+            width='stretch'
         )
