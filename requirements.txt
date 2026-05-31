@@ -11,7 +11,7 @@ setuptools
 mp-api==0.46.1
 aflow==0.0.11
 pillow==11.2.1
-pymatgen.analysis.defects==2025.1.18
+pymatgen.analysis.defects==2026.3.20
 psutil==7.0.0
 requests==2.32.5
 maggma==0.72.0 
