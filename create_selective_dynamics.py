@@ -221,7 +221,7 @@ def render_selective_dynamics_ui(structures_dict, selected_file=None):
 
     with st.expander("📋 View Atom Information", expanded=False):
         df = get_atom_info_dataframe(structure_to_analyze)
-        st.dataframe(df, use_container_width=True, height=400)
+        st.dataframe(df, width='stretch', height=400)
 
         st.markdown("**Element Summary:**")
         element_counts = df['Element'].value_counts().to_dict()
