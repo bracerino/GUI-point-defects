@@ -3070,7 +3070,7 @@ if st.session_state.uploaded_files:
                                                         stp = st.number_input("Step %", 0.01, max(0.01, mx - mn),
                                                                               min(1.0, max(0.01, mx - mn)), 0.1,
                                                                               key=f"sub_vary_step_perc_{el}")
-                                                        vals = [round(x, 2) for x in
+                                                        vals = [round(float(x), 2) for x in
                                                                 np.arange(mn, mx + stp / 2, stp)]
                                                         vary_ranges[el] = {"unit": "percentage", "values": vals,
                                                                            "count": el_count}
@@ -3146,7 +3146,7 @@ if st.session_state.uploaded_files:
                                                         stp = st.number_input("Step %", 0.01, max(0.01, mx - mn),
                                                                               min(1.0, max(0.01, mx - mn)), 0.1,
                                                                               key=f"vac_vary_step_perc_{el}")
-                                                        vals = [round(x, 2) for x in
+                                                        vals = [round(float(x), 2) for x in
                                                                 np.arange(mn, mx + stp / 2, stp)]
                                                         vary_ranges[el] = {"unit": "percentage", "values": vals,
                                                                            "count": el_count}
