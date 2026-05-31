@@ -1,5 +1,5 @@
 streamlit==1.57.0
-# numpy==1.26.4
+numpy==2.4.6 # 1.26.4
 matplotlib==3.10.3
 ase==3.28.0
 #matminer==0.9.3
