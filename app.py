@@ -73,7 +73,7 @@ def _running_locally():
 
 # Upper bound for "Configurations per concentration" in batch generation:
 # higher locally, capped lower for the shared online deployment.
-MAX_CONFIGS_PER_CONCENTRATION = 1000 if _running_locally() else 100
+MAX_CONFIGS_PER_CONCENTRATION = 1000 if _running_locally() else 300
 
 # Cap on the TOTAL number of structures one batch run may produce (e.g. a nested
 # concentration grid: n1 * n2 * configs_per_concentration). Unlimited locally,
