@@ -78,7 +78,7 @@ MAX_CONFIGS_PER_CONCENTRATION = 3000 if _running_locally() else 300
 # Cap on the TOTAL number of structures one batch run may produce (e.g. a nested
 # concentration grid: n1 * n2 * configs_per_concentration). Unlimited locally,
 # capped on the shared online deployment to protect the server.
-MAX_TOTAL_CONFIGS = None if _running_locally() else 1000
+MAX_TOTAL_CONFIGS = None if _running_locally() else 3000
 
 
 def get_orthogonal_cell(structure, max_atoms=200):
