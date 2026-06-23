@@ -4237,6 +4237,31 @@ if st.session_state.uploaded_files:
                             else:
                                 st.error("No structure available for analysis")
 
+                        if st.button("📥 Wrap Atoms into Cell", key="wrap_atoms_btn", type='secondary'):
+                            if pmg_to_visualize:
+                                with st.spinner("Wrapping atoms into the unit cell..."):
+                                    try:
+                                        wrapped_structure = pmg_to_visualize.copy()
+                                        wrapped_structure.translate_sites(
+                                            list(range(len(wrapped_structure))),
+                                            [0.0, 0.0, 0.0],
+                                            frac_coords=True,
+                                            to_unit_cell=True
+                                        )
+
+                                        st.session_state.current_structure = wrapped_structure.copy()
+                                        if getattr(st.session_state, 'represented_structure', None):
+                                            st.session_state.represented_structure = wrapped_structure.copy()
+                                        st.session_state.helpful = True
+
+                                        st.success("✅ Atoms wrapped back into the unit cell.")
+                                        st.rerun()
+
+                                    except Exception as e:
+                                        st.error(f"Error wrapping atoms: {e}")
+                            else:
+                                st.error("No structure available for wrapping")
+
                     with col_sg_apply:
                         if st.button("⚙️ Apply Symmetry", key="apply_symmetry_btn", type='secondary'):
                             if pmg_to_visualize:
@@ -4275,6 +4300,57 @@ if st.session_state.uploaded_files:
                                             "💡 **Tip:** Try adjusting symmetry precision or check if structure has defects")
                             else:
                                 st.error("No structure available for symmetry operations")
+
+                        vacuum_thickness = st.number_input(
+                            "Vacuum thickness (Å)",
+                            min_value=0.0,
+                            max_value=200.0,
+                            value=15.0,
+                            step=1.0,
+                            format="%.2f",
+                            key="vacuum_thickness_input",
+                            help="Amount of vacuum to add above the structure along the c direction."
+                        )
+                        if st.button("📏 Add Vacuum (c direction)", key="add_vacuum_btn", type='secondary'):
+                            if pmg_to_visualize:
+                                with st.spinner("Adding vacuum along c..."):
+                                    try:
+                                        from pymatgen.core import Lattice, Structure
+
+                                        old_lattice = pmg_to_visualize.lattice
+                                        matrix = old_lattice.matrix.copy()
+                                        c_vec = matrix[2]
+                                        c_len = float(np.linalg.norm(c_vec))
+
+                                        if c_len < 1e-8:
+                                            st.error("Cannot add vacuum: c lattice vector has zero length.")
+                                        else:
+                                            c_unit = c_vec / c_len
+                                            matrix[2] = c_unit * (c_len + vacuum_thickness)
+                                            new_lattice = Lattice(matrix)
+
+                                            vacuum_structure = Structure(
+                                                new_lattice,
+                                                pmg_to_visualize.species,
+                                                pmg_to_visualize.cart_coords,
+                                                coords_are_cartesian=True,
+                                                site_properties=pmg_to_visualize.site_properties
+                                            )
+
+                                            st.session_state.current_structure = vacuum_structure.copy()
+                                            if getattr(st.session_state, 'represented_structure', None):
+                                                st.session_state.represented_structure = vacuum_structure.copy()
+                                            st.session_state.helpful = True
+
+                                            st.success(
+                                                f"✅ Added {vacuum_thickness:.2f} Å of vacuum along c "
+                                                f"(c: {c_len:.3f} → {c_len + vacuum_thickness:.3f} Å).")
+                                            st.rerun()
+
+                                    except Exception as e:
+                                        st.error(f"Error adding vacuum: {e}")
+                            else:
+                                st.error("No structure available for adding vacuum")
 
                     st.markdown("##### Structure Info")
                     cp = ase_to_visualize.cell.cellpar()
@@ -4423,7 +4499,8 @@ if st.session_state.uploaded_files:
                         data=dl_content,
                         file_name=dl_name,
                         mime=dl_mime,
-                        key=f"actual_download_{fmt_dl}"
+                        key=f"actual_download_{fmt_dl}",
+                        type="primary"
                     )
 
                 except Exception as e_dl:
