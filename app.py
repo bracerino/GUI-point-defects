@@ -2996,25 +2996,45 @@ if st.session_state.uploaded_files:
                                     help=f"How many of the nearest {nv_remove_el} atoms to remove around each substituted {nv_target_sub_el} atom."
                                 )
 
+                            nv_allow_shared = st.checkbox(
+                                "Allow shared neighbours (remove fewer vacancies when substituted atoms share neighbours)",
+                                value=False,
+                                key="nv_allow_shared",
+                                help="If checked, each substituted atom removes its nearest neighbours independently; "
+                                     "an atom shared between two substituted sites is removed only once, so the total "
+                                     "number of vacancies can be fewer than requested. If unchecked, each substituted "
+                                     "atom always removes the full requested number of vacancies by reaching out to "
+                                     "farther atoms when its nearest neighbours are already taken by another site."
+                            )
+
                             n_target_sites = sum(
                                 int(round(sum(1 for site in active_pmg_for_defects.sites if site.specie.symbol == o) * s.get("percentage", 0) / 100.0))
                                 for o, s in sub_settings.items()
                                 if s.get("substitute", "").strip() == nv_target_sub_el
                             )
-                            st.info(
-                                f"• Around each of the **{n_target_sites}** substituted **{nv_target_sub_el}** atom(s), "
-                                f"the **{nv_n_per_site}** nearest **{nv_remove_el}** atom(s) will be removed "
-                                f"(up to **{n_target_sites * nv_n_per_site}** vacancies, fewer if neighbours are shared).")
+                            if nv_allow_shared:
+                                st.info(
+                                    f"• Around each of the **{n_target_sites}** substituted **{nv_target_sub_el}** atom(s), "
+                                    f"the **{nv_n_per_site}** nearest **{nv_remove_el}** atom(s) will be removed "
+                                    f"(up to **{n_target_sites * nv_n_per_site}** vacancies, fewer if neighbours are shared).")
+                            else:
+                                st.info(
+                                    f"• Around each of the **{n_target_sites}** substituted **{nv_target_sub_el}** atom(s), "
+                                    f"**{nv_n_per_site}** distinct **{nv_remove_el}** atom(s) will be removed "
+                                    f"(**{n_target_sites * nv_n_per_site}** vacancies total; farther atoms are used "
+                                    f"when nearest neighbours are shared, limited only by available {nv_remove_el} atoms).")
                         else:
                             nv_target_sub_el = None
                             nv_remove_el = None
                             nv_n_per_site = 0
+                            nv_allow_shared = False
                             st.warning("Configure at least one real-element substitution above to enable nearby vacancies.")
                     else:
                         st.warning("No elements for substitution.")
                         nv_target_sub_el = None
                         nv_remove_el = None
                         nv_n_per_site = 0
+                        nv_allow_shared = False
 
                     sub_only_for_dl = st.session_state.get("substitution_only_structure")
                     if sub_only_for_dl is not None:
@@ -3770,7 +3790,8 @@ if st.session_state.uploaded_files:
                                                 modified_struct, sub_only_struct = substitute_atoms_with_nearby_vacancies(
                                                     base_struct, sub_settings, nv_target_sub_el, nv_remove_el,
                                                     nv_n_per_site, sub_mode, sub_target, None, seed,
-                                                    return_substitution_only=True
+                                                    return_substitution_only=True,
+                                                    allow_shared_neighbors=nv_allow_shared
                                                 )
                                                 # Save the same substituted structures (without the nearby
                                                 # vacancies removed) in a separate folder inside the ZIP.
@@ -4154,7 +4175,8 @@ if st.session_state.uploaded_files:
                         mod_struct, sub_only_struct = substitute_atoms_with_nearby_vacancies(
                             mod_struct, sub_settings, nv_target_sub_el, nv_remove_el,
                             nv_n_per_site, sub_mode, sub_target, col_defect_log,
-                            return_substitution_only=True)
+                            return_substitution_only=True,
+                            allow_shared_neighbors=nv_allow_shared)
                         st.session_state.substitution_only_structure = sub_only_struct
                         if mod_struct.composition != init_comp or len(mod_struct) != init_n:
                             changed = True
