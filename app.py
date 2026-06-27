@@ -271,9 +271,9 @@ st.markdown(
         font-weight: 600;
     ">
         <span style="color:#2563eb; font-weight:800;">Release:</span>
-        v0.4.0 &nbsp; | &nbsp;
+        v0.4.2 &nbsp; | &nbsp;
         <span style="color:#2563eb; font-weight:800;">Updated:</span>
-        May 27, 2026
+        June 27, 2026
     </div>
     """,
     unsafe_allow_html=True
@@ -4309,9 +4309,9 @@ if st.session_state.uploaded_files:
                     with col_defect_log:
                         col_defect_log.success(
                             "Defect op applied." if changed else "Defect op finished (structure may be unchanged).")
-                        st.success("Will refresh interface in 3 seconds, please wait")
-                    st.toast(f"{operation_mode} completed successfully!. Refresh in 3 seconds.", icon="✅")
-                    time.sleep(3)
+                        st.success("Will refresh interface in 2 seconds, please wait")
+                    st.toast(f"{operation_mode} completed successfully!. Refresh in 2 seconds.", icon="✅")
+                    time.sleep(2)
                     st.rerun()
 
 
