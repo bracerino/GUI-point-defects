@@ -2066,7 +2066,8 @@ if st.session_state.uploaded_files:
                 defect_op_limit = 32
                 defect_nearest_farthest_limit = 500
                 defect_ops = ["Insert Interstitials (Voronoi method)", "Insert Interstitials (Fast Grid method)",
-                              "Create Vacancies", "Substitute Atoms", "Apply Atomic Displacements",
+                              "Create Vacancies", "Substitute Atoms", "Substitute Atoms + Nearby Vacancies",
+                              "Apply Atomic Displacements",
                               "Create Substitution Cluster", "Swap Nearest Elements"]
                 current_defect_op_options = defect_ops
                 if atom_count_defects > defect_op_limit:
@@ -2074,7 +2075,8 @@ if st.session_state.uploaded_files:
                         f"⚠️ Interstitials (Voronoi) disabled: Structure has {atom_count_defects} atoms (limit: {defect_op_limit}). "
                         f"For interstitials, use grid method instead.")
                     current_defect_op_options = ["Insert Interstitials (Fast Grid method)", "Create Vacancies",
-                                                 "Substitute Atoms","Apply Atomic Displacements", "Create Substitution Cluster",
+                                                 "Substitute Atoms", "Substitute Atoms + Nearby Vacancies",
+                                                 "Apply Atomic Displacements", "Create Substitution Cluster",
                                                  "Swap Nearest Elements","Create Compressed Bubble"]
 
                 op_mode_key = "defect_op_mode_limited" if atom_count_defects > defect_op_limit else "defect_op_mode_full"
@@ -2851,6 +2853,219 @@ if st.session_state.uploaded_files:
                             st.info("No substitutions will be made with current settings.")
                     else:
                         st.warning("No elements for substitution.")
+                elif operation_mode == "Substitute Atoms + Nearby Vacancies":
+                    st.markdown("**Substitute Atoms + Nearby Vacancies Settings**")
+                    st.info(
+                        "💡 First performs substitutions (same as 'Substitute Atoms'). Then, for one chosen "
+                        "substituted element, removes a set number of the nearest atoms of another element "
+                        "around each substituted site (creating vacancies of that element around the substituted atoms).")
+                    sub_c1, sub_c2 = st.columns(2)
+                    atom_count_for_sub = len(active_pmg_for_defects)
+                    if atom_count_for_sub > 500:
+                        available_sub_modes = ["random"]
+                        st.warning(
+                            f"⚠️ Structure has {atom_count_for_sub} atoms. Only 'random' mode available for performance (limit: 500 atoms for distance-based modes).")
+                    else:
+                        available_sub_modes = ["farthest", "nearest", "moderate", "random"]
+
+                    with sub_c1:
+                        sub_mode = st.selectbox("Selection Mode", available_sub_modes, 0, key="sub_mode_nv")
+
+                    sub_target = 0.5
+                    if sub_mode == "moderate":
+                        sub_target = sub_c2.number_input("Target (0=nearest, 1=farthest)", 0.0, 1.0, 0.5, 0.1,
+                                                         format="%.1f", key="sub_target_nv")
+                    elif sub_mode == "random":
+                        with sub_c2:
+                            st.info("Random selection")
+
+                    sub_els = sorted(list(set(s.specie.symbol for s in active_pmg_for_defects.sites if s.specie)))
+                    sub_settings = {}
+                    if sub_els:
+                        sub_input_mode = st.radio(
+                            "Specify substitutions by:",
+                            options=["Percentage", "Number of atoms"],
+                            horizontal=True,
+                            key="sub_input_mode_nv",
+                            help="Choose whether to specify substitution concentration as percentage or absolute number of atoms"
+                        )
+                        st.markdown("**Set substitution parameters:**")
+
+                        for el_s in sub_els:
+                            el_count_s = sum(
+                                1 for site in active_pmg_for_defects.sites if site.specie.symbol == el_s)
+
+                            st.markdown(f"**Element: {el_s} (total: {el_count_s} atoms)**")
+                            sub_col1, sub_col2 = st.columns(2)
+
+                            with sub_col1:
+                                if sub_input_mode == "Percentage":
+                                    sub_p = st.slider(
+                                        f"Percentage of {el_s} to substitute",
+                                        min_value=0.00,
+                                        max_value=100.00,
+                                        value=0.00,
+                                        step=0.01,
+                                        key=f"sub_p_nv_{el_s}",
+                                        help=f"Substitute percentage of {el_count_s} {el_s} atoms"
+                                    )
+                                else:  # Number of atoms
+                                    sub_count = st.number_input(
+                                        f"Number of {el_s} to substitute",
+                                        min_value=0,
+                                        max_value=el_count_s,
+                                        value=0,
+                                        step=1,
+                                        key=f"sub_count_nv_{el_s}",
+                                        help=f"Number of {el_s} atoms to substitute (out of {el_count_s} total)"
+                                    )
+                                    sub_p = (sub_count / el_count_s * 100) if el_count_s > 0 else 0
+
+                            with sub_col2:
+                                sub_t_el = st.selectbox(
+                                    f"Replace {el_s} with:",
+                                    options=['Vac'] + ELEMENTS,
+                                    index=1,
+                                    key=f"sub_t_nv_{el_s}",
+                                    help="Select substitute element. Choose 'Vac' to remove the selected atoms (create vacancies) instead of replacing them."
+                                )
+
+                            sub_settings[el_s] = {"percentage": sub_p, "substitute": sub_t_el.strip()}
+
+                        st.markdown("**Preview of substitutions to be made:**")
+                        preview_text_sub = []
+                        total_to_substitute = 0
+                        for orig_el_symbol, settings in sub_settings.items():
+                            perc_to_sub = settings.get("percentage", 0)
+                            sub_el_symbol = settings.get("substitute", "").strip()
+                            if perc_to_sub > 0 and sub_el_symbol:
+                                el_count_sub = sum(
+                                    1 for site in active_pmg_for_defects.sites if
+                                    site.specie.symbol == orig_el_symbol)
+                                n_to_substitute = int(round(el_count_sub * perc_to_sub / 100.0))
+                                total_to_substitute += n_to_substitute
+                                if sub_el_symbol.lower() in ("vac", "vacancy"):
+                                    preview_text_sub.append(
+                                        f"**{orig_el_symbol} → Vacancy (removed)**: {n_to_substitute} atoms ({round(perc_to_sub,2)}%) of {el_count_sub}")
+                                else:
+                                    preview_text_sub.append(
+                                        f"**{orig_el_symbol} → {sub_el_symbol}**: {n_to_substitute} atoms ({round(perc_to_sub,2)}%) of {el_count_sub}")
+
+                        if preview_text_sub:
+                            for text in preview_text_sub:
+                                st.write(f"• {text}")
+                            st.info(f"**Total atoms to substitute: {total_to_substitute}**")
+                        else:
+                            st.info("No substitutions will be made with current settings.")
+
+                        st.markdown("---")
+                        st.markdown("**Nearby vacancy settings:**")
+
+                        # Substitute (target) elements that the user is actually introducing.
+                        target_sub_choices = sorted(set(
+                            s.get("substitute", "").strip() for s in sub_settings.values()
+                            if s.get("percentage", 0) > 0
+                            and s.get("substitute", "").strip()
+                            and s.get("substitute", "").strip().lower() not in ("vac", "vacancy")
+                        ))
+
+                        nv_c1, nv_c2, nv_c3 = st.columns(3)
+                        if target_sub_choices:
+                            with nv_c1:
+                                nv_target_sub_el = st.selectbox(
+                                    "Substituted element to target",
+                                    options=target_sub_choices,
+                                    key="nv_target_sub_el",
+                                    help="Vacancies will be created around every atom that was substituted to this element."
+                                )
+                            with nv_c2:
+                                nv_remove_el = st.selectbox(
+                                    "Element to remove (create vacancies of)",
+                                    options=sub_els,
+                                    key="nv_remove_el",
+                                    help="The nearest atoms of this element around each substituted site will be removed."
+                                )
+                            with nv_c3:
+                                nv_n_per_site = st.number_input(
+                                    f"Number of {nv_remove_el} to remove per site",
+                                    min_value=0,
+                                    max_value=50,
+                                    value=1,
+                                    step=1,
+                                    key="nv_n_per_site",
+                                    help=f"How many of the nearest {nv_remove_el} atoms to remove around each substituted {nv_target_sub_el} atom."
+                                )
+
+                            n_target_sites = sum(
+                                int(round(sum(1 for site in active_pmg_for_defects.sites if site.specie.symbol == o) * s.get("percentage", 0) / 100.0))
+                                for o, s in sub_settings.items()
+                                if s.get("substitute", "").strip() == nv_target_sub_el
+                            )
+                            st.info(
+                                f"• Around each of the **{n_target_sites}** substituted **{nv_target_sub_el}** atom(s), "
+                                f"the **{nv_n_per_site}** nearest **{nv_remove_el}** atom(s) will be removed "
+                                f"(up to **{n_target_sites * nv_n_per_site}** vacancies, fewer if neighbours are shared).")
+                        else:
+                            nv_target_sub_el = None
+                            nv_remove_el = None
+                            nv_n_per_site = 0
+                            st.warning("Configure at least one real-element substitution above to enable nearby vacancies.")
+                    else:
+                        st.warning("No elements for substitution.")
+                        nv_target_sub_el = None
+                        nv_remove_el = None
+                        nv_n_per_site = 0
+
+                    sub_only_for_dl = st.session_state.get("substitution_only_structure")
+                    if sub_only_for_dl is not None:
+                        st.markdown("---")
+                        st.markdown("**Download substitution-only structure (last applied):**")
+                        st.caption(
+                            "Structure with the substitutions applied but WITHOUT the nearby vacancies removed "
+                            "(same atoms substituted as in the applied result). Reflects the most recent "
+                            "'Apply Selected Defect Operation'.")
+                        dl_so_c1, dl_so_c2 = st.columns([1, 2])
+                        with dl_so_c1:
+                            sub_only_fmt = st.selectbox(
+                                "Format",
+                                options=["VASP (POSCAR)", "CIF", "XYZ"],
+                                key="sub_only_dl_fmt"
+                            )
+                        try:
+                            if sub_only_fmt == "CIF":
+                                so_content = str(CifWriter(sub_only_for_dl, symprec=None, refine_struct=False))
+                                so_name = "substitution_only.cif"
+                                so_mime = "chemical/x-cif"
+                            elif sub_only_fmt == "VASP (POSCAR)":
+                                so_ase = AseAtomsAdaptor.get_atoms(sub_only_for_dl)
+                                so_sio = StringIO()
+                                write(so_sio, so_ase, format="vasp", direct=True, sort=True)
+                                so_content = so_sio.getvalue()
+                                so_name = "substitution_only.poscar"
+                                so_mime = "text/plain"
+                            else:  # XYZ
+                                so_lat = sub_only_for_dl.lattice.matrix
+                                so_lines = [str(len(sub_only_for_dl))]
+                                so_latstr = " ".join(f"{x:.6f}" for row in so_lat for x in row)
+                                so_lines.append(f'Lattice="{so_latstr}" Properties=species:S:1:pos:R:3')
+                                for site in sub_only_for_dl:
+                                    c = sub_only_for_dl.lattice.get_cartesian_coords(site.frac_coords)
+                                    so_lines.append(f"{site.specie.symbol} {c[0]:.6f} {c[1]:.6f} {c[2]:.6f}")
+                                so_content = "\n".join(so_lines)
+                                so_name = "substitution_only.xyz"
+                                so_mime = "chemical/x-xyz"
+
+                            with dl_so_c2:
+                                st.download_button(
+                                    label=f"💾 Download substitution-only ({sub_only_fmt})",
+                                    data=so_content,
+                                    file_name=so_name,
+                                    mime=so_mime,
+                                    key="download_substitution_only_btn",
+                                    type="secondary"
+                                )
+                        except Exception as e_so:
+                            st.error(f"Error generating substitution-only file: {e_so}")
                 elif operation_mode == "Apply Atomic Displacements":
                     st.markdown("**Apply Atomic Displacements Settings**")
                     st.info(
@@ -3551,6 +3766,17 @@ if st.session_state.uploaded_files:
                                                 modified_struct = substitute_atoms_in_structure(
                                                     base_struct, sub_settings, sub_mode, sub_target, None, seed
                                                 )
+                                            elif operation_mode == "Substitute Atoms + Nearby Vacancies":
+                                                modified_struct, sub_only_struct = substitute_atoms_with_nearby_vacancies(
+                                                    base_struct, sub_settings, nv_target_sub_el, nv_remove_el,
+                                                    nv_n_per_site, sub_mode, sub_target, None, seed,
+                                                    return_substitution_only=True
+                                                )
+                                                # Save the same substituted structures (without the nearby
+                                                # vacancies removed) in a separate folder inside the ZIP.
+                                                st.session_state.generated_structures[
+                                                    f"substitution_only_no_vacancies/{config_name}"] = sub_only_struct
+                                                config_name = f"with_nearby_vacancies/{config_name}"
                                             elif operation_mode == "Apply Atomic Displacements":
                                                 modified_struct = apply_atomic_displacements(
                                                     base_struct,
@@ -3901,6 +4127,8 @@ if st.session_state.uploaded_files:
                     mod_struct = active_pmg_for_defects.copy()
                     changed = False
                     random_seed = None
+                    if operation_mode != "Substitute Atoms + Nearby Vacancies":
+                        st.session_state.pop("substitution_only_structure", None)
                     with col_defect_log:
                         st.markdown(f"###### Log: {operation_mode}")
 
@@ -3920,6 +4148,16 @@ if st.session_state.uploaded_files:
                         mod_struct = substitute_atoms_in_structure(mod_struct, sub_settings, sub_mode, sub_target,
                                                                    col_defect_log)
                         if mod_struct.composition != init_comp: changed = True
+                    elif operation_mode == "Substitute Atoms + Nearby Vacancies":
+                        init_comp = mod_struct.composition
+                        init_n = len(mod_struct)
+                        mod_struct, sub_only_struct = substitute_atoms_with_nearby_vacancies(
+                            mod_struct, sub_settings, nv_target_sub_el, nv_remove_el,
+                            nv_n_per_site, sub_mode, sub_target, col_defect_log,
+                            return_substitution_only=True)
+                        st.session_state.substitution_only_structure = sub_only_struct
+                        if mod_struct.composition != init_comp or len(mod_struct) != init_n:
+                            changed = True
                     elif operation_mode == "Apply Atomic Displacements":
                         init_positions = np.array([site.frac_coords for site in mod_struct.sites])
                         mod_struct = apply_atomic_displacements(
@@ -4082,6 +4320,7 @@ if st.session_state.uploaded_files:
                     if st.session_state.current_structure_before_defects:
                         st.session_state.current_structure = st.session_state.current_structure_before_defects.copy()
                     st.session_state.helpful = False
+                    st.session_state.pop("substitution_only_structure", None)
                     with col_defect_log:
                         st.info("Defects reset to post-supercell state.")
                     st.rerun()
