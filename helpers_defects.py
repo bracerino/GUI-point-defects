@@ -3398,6 +3398,151 @@ def substitute_atoms_in_structure(structure_obj, substitution_settings_dict, sel
         return structure_obj.copy()
 
 
+def substitute_atoms_with_nearby_vacancies(structure_obj, substitution_settings_dict,
+                                           target_substitute_element, nearby_vacancy_element,
+                                           n_vacancies_per_site, selection_mode_sub="farthest",
+                                           target_value_sub=0.5, log_area=None, random_seed=None,
+                                           return_substitution_only=False):
+    """Perform substitutions (same logic as substitute_atoms_in_structure) and then, for every
+    atom that was substituted to ``target_substitute_element``, remove the ``n_vacancies_per_site``
+    nearest atoms of ``nearby_vacancy_element`` (creating vacancies of that element around each
+    substituted site).
+
+    When ``return_substitution_only`` is True, returns a tuple ``(final_structure,
+    substitution_only_structure)`` where the second structure has the substitutions applied but
+    the nearby vacancies NOT removed (the same atoms are substituted in both)."""
+    if random_seed is not None:
+        import random
+        random.seed(random_seed)
+        np.random.seed(random_seed)
+
+    if log_area: log_area.info("Attempting substitutions with nearby vacancies...")
+
+    new_species_list = [site.species for site in structure_obj.sites]
+    new_coords_list = [site.frac_coords for site in structure_obj.sites]
+    modified_indices_count = 0
+    indices_to_remove = []  # Sites selected for vacancy creation via substitute == 'Vac'
+    target_substituted_global_indices = []  # Sites substituted to the chosen target element
+
+    target_sub_clean = (target_substitute_element or "").strip()
+    nearby_el_clean = (nearby_vacancy_element or "").strip()
+    try:
+        n_vacancies_per_site = int(n_vacancies_per_site)
+    except (TypeError, ValueError):
+        n_vacancies_per_site = 0
+
+    for orig_el_symbol, settings in substitution_settings_dict.items():
+        perc_to_sub = settings.get("percentage", 0)
+        sub_el_symbol = settings.get("substitute", "").strip()
+        if perc_to_sub <= 0 or not sub_el_symbol: continue
+        is_vacancy = sub_el_symbol.lower() in ("vac", "vacancy")
+        sub_element = None
+        if not is_vacancy:
+            try:
+                sub_element = Element(sub_el_symbol)
+            except Exception:
+                if log_area: log_area.warning(
+                    f"  Invalid substitute element symbol: '{sub_el_symbol}'. Skipping for {orig_el_symbol}.")
+                continue
+        orig_el_indices_in_struct = [i for i, site in enumerate(structure_obj.sites) if
+                                     site.specie and site.specie.symbol == orig_el_symbol]
+        n_sites_of_orig_el = len(orig_el_indices_in_struct)
+        n_to_sub_for_el = int(round(n_sites_of_orig_el * perc_to_sub / 100.0))
+        if log_area: log_area.write(
+            f"  For {orig_el_symbol} -> {sub_el_symbol}: Found {n_sites_of_orig_el} sites of {orig_el_symbol}. Requested to substitute {perc_to_sub}% ({n_to_sub_for_el} atoms).")
+        if n_to_sub_for_el == 0: continue
+        if n_to_sub_for_el > n_sites_of_orig_el:
+            if log_area: log_area.warning(
+                f"    Cannot substitute {n_to_sub_for_el} atoms of {orig_el_symbol}, only {n_sites_of_orig_el} exist. Substituting all.")
+            n_to_sub_for_el = n_sites_of_orig_el
+        orig_el_frac_coords = [structure_obj.sites[i].frac_coords for i in orig_el_indices_in_struct]
+        if not orig_el_frac_coords and n_to_sub_for_el > 0:
+            if log_area: log_area.warning(f"    No coordinates found for {orig_el_symbol} to select from.")
+            continue
+        _, selected_local_indices_for_substitution = select_spaced_points(orig_el_frac_coords, n_to_sub_for_el,
+                                                                          selection_mode_sub, target_value_sub,
+                                                                          random_seed)
+        global_indices_for_this_el_substitution = [orig_el_indices_in_struct[i] for i in
+                                                   selected_local_indices_for_substitution]
+        for global_idx_to_sub in global_indices_for_this_el_substitution:
+            if is_vacancy:
+                indices_to_remove.append(global_idx_to_sub)
+            else:
+                new_species_list[global_idx_to_sub] = sub_element
+                if sub_el_symbol == target_sub_clean:
+                    target_substituted_global_indices.append(global_idx_to_sub)
+            modified_indices_count += 1
+        if is_vacancy:
+            if log_area: log_area.write(
+                f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for vacancy creation (removal).")
+        else:
+            if log_area: log_area.write(
+                f"    Selected {len(global_indices_for_this_el_substitution)} sites of {orig_el_symbol} for substitution with {sub_el_symbol}.")
+
+    # Build the substituted structure with ALL sites retained so global indices stay valid.
+    substituted_full = Structure(lattice=structure_obj.lattice, species=new_species_list,
+                                 coords=new_coords_list, coords_are_cartesian=False)
+
+    nearby_indices_to_remove = set()
+    if n_vacancies_per_site > 0 and target_substituted_global_indices and nearby_el_clean:
+        # Candidate neighbour sites of the chosen element (excluding sites already flagged for removal).
+        nearby_el_indices = [i for i, site in enumerate(substituted_full.sites)
+                             if site.specie and site.specie.symbol == nearby_el_clean
+                             and i not in indices_to_remove]
+        if not nearby_el_indices:
+            if log_area: log_area.warning(
+                f"    No '{nearby_el_clean}' atoms available to remove around substituted '{target_sub_clean}' sites.")
+        for tgt_idx in target_substituted_global_indices:
+            dists = []
+            for j in nearby_el_indices:
+                if j in nearby_indices_to_remove:
+                    continue
+                try:
+                    d = substituted_full.get_distance(tgt_idx, j)
+                except Exception:
+                    continue
+                dists.append((d, j))
+            dists.sort(key=lambda x: x[0])
+            removed_here = 0
+            for d, j in dists:
+                nearby_indices_to_remove.add(j)
+                removed_here += 1
+                if removed_here >= n_vacancies_per_site:
+                    break
+            if log_area: log_area.write(
+                f"    Around substituted {target_sub_clean} site (index {tgt_idx}): selected {removed_here} nearest "
+                f"{nearby_el_clean} atom(s) for removal.")
+
+    # Substitution-only structure: substitutions applied (incl. any 'Vac' substitutions) but
+    # WITHOUT the nearby vacancies removed.
+    substitution_only_struct = None
+    if return_substitution_only:
+        substitution_only_struct = substituted_full.copy()
+        if indices_to_remove:
+            substitution_only_struct.remove_sites(sorted(set(indices_to_remove), reverse=True))
+
+    all_indices_to_remove = sorted(set(indices_to_remove) | nearby_indices_to_remove, reverse=True)
+    if all_indices_to_remove:
+        substituted_full.remove_sites(all_indices_to_remove)
+        if log_area: log_area.info(
+            f"Removed {len(all_indices_to_remove)} atoms in total "
+            f"({len(nearby_indices_to_remove)} nearby {nearby_el_clean} vacancies "
+            f"around {len(target_substituted_global_indices)} substituted {target_sub_clean} atoms).")
+
+    if modified_indices_count > 0 or nearby_indices_to_remove:
+        if log_area: log_area.info(f"Attempted to modify {modified_indices_count} atoms via substitution.")
+        final_struct = substituted_full
+    else:
+        if log_area: log_area.info("No atoms were selected for substitution.")
+        final_struct = structure_obj.copy()
+        if substitution_only_struct is None:
+            substitution_only_struct = structure_obj.copy()
+
+    if return_substitution_only:
+        return final_struct, substitution_only_struct
+    return final_struct
+
+
 def get_orthogonal_cell(structure, max_atoms=200):
     from pymatgen.transformations.advanced_transformations import CubicSupercellTransformation
 
