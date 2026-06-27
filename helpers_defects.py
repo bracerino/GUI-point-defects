@@ -3402,11 +3402,19 @@ def substitute_atoms_with_nearby_vacancies(structure_obj, substitution_settings_
                                            target_substitute_element, nearby_vacancy_element,
                                            n_vacancies_per_site, selection_mode_sub="farthest",
                                            target_value_sub=0.5, log_area=None, random_seed=None,
-                                           return_substitution_only=False):
+                                           return_substitution_only=False,
+                                           allow_shared_neighbors=False):
     """Perform substitutions (same logic as substitute_atoms_in_structure) and then, for every
     atom that was substituted to ``target_substitute_element``, remove the ``n_vacancies_per_site``
     nearest atoms of ``nearby_vacancy_element`` (creating vacancies of that element around each
-    substituted site).
+    substituted site). Distances use periodic boundary conditions (minimum image convention).
+
+    ``allow_shared_neighbors`` controls what happens when two substituted sites compete for the
+    same neighbouring atom:
+      * False (default): each substituted site removes ``n_vacancies_per_site`` distinct atoms,
+        reaching farther out to find unused atoms when its nearest are already claimed.
+      * True: each site simply removes its ``n_vacancies_per_site`` nearest atoms; shared atoms
+        are removed only once, so the total number of vacancies may be fewer.
 
     When ``return_substitution_only`` is True, returns a tuple ``(final_structure,
     substitution_only_structure)`` where the second structure has the substitutions applied but
@@ -3495,7 +3503,9 @@ def substitute_atoms_with_nearby_vacancies(structure_obj, substitution_settings_
         for tgt_idx in target_substituted_global_indices:
             dists = []
             for j in nearby_el_indices:
-                if j in nearby_indices_to_remove:
+                # When NOT allowing shared neighbours, skip atoms already taken by another
+                # substituted site so this site reaches farther out for its own atoms.
+                if not allow_shared_neighbors and j in nearby_indices_to_remove:
                     continue
                 try:
                     d = substituted_full.get_distance(tgt_idx, j)
@@ -3503,12 +3513,20 @@ def substitute_atoms_with_nearby_vacancies(structure_obj, substitution_settings_
                     continue
                 dists.append((d, j))
             dists.sort(key=lambda x: x[0])
-            removed_here = 0
-            for d, j in dists:
-                nearby_indices_to_remove.add(j)
-                removed_here += 1
-                if removed_here >= n_vacancies_per_site:
-                    break
+            if allow_shared_neighbors:
+                # Take the N nearest neighbours of this site regardless of overlap with other
+                # sites; shared atoms are removed only once (=> fewer total vacancies).
+                selected = [j for _, j in dists[:n_vacancies_per_site]]
+                nearby_indices_to_remove.update(selected)
+                removed_here = len(selected)
+            else:
+                # Take N atoms not yet claimed by another site (reaching farther if needed).
+                removed_here = 0
+                for d, j in dists:
+                    nearby_indices_to_remove.add(j)
+                    removed_here += 1
+                    if removed_here >= n_vacancies_per_site:
+                        break
             if log_area: log_area.write(
                 f"    Around substituted {target_sub_clean} site (index {tgt_idx}): selected {removed_here} nearest "
                 f"{nearby_el_clean} atom(s) for removal.")
