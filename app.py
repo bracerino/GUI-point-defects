@@ -4498,11 +4498,61 @@ if st.session_state.uploaded_files:
                             else:
                                 st.error("No structure available for analysis")
 
+                        use_wrap_tol = st.checkbox(
+                            "Align near-boundary atoms (rigid shift)",
+                            value=False,
+                            key="wrap_use_tolerance",
+                            help="Optional. Translate the WHOLE structure by a single vector so that "
+                                 "atoms drifting just inside a cell face (e.g. at ~0.999) are aligned "
+                                 "onto it, then wrap. All atoms move by the same amount, so the "
+                                 "structure is physically identical under PBC — only the position of "
+                                 "the periodic cut changes. Useful for averaged/MD structures."
+                        )
+                        wrap_tol_value = 0.0
+                        if use_wrap_tol:
+                            wrap_tol_value = st.number_input(
+                                "Alignment tolerance (fractional)",
+                                min_value=0.0,
+                                max_value=0.5,
+                                value=0.01,
+                                step=0.005,
+                                format="%.3f",
+                                key="wrap_tolerance_input",
+                                help="Atoms within this fractional distance of a cell face are used to "
+                                     "compute the rigid shift (their average offset from the face). The "
+                                     "same shift is applied to every atom. 0.01 ≈ 1% of the cell edge."
+                            )
+
                         if st.button("📥 Wrap Atoms into Cell", key="wrap_atoms_btn", type='secondary'):
                             if pmg_to_visualize:
                                 with st.spinner("Wrapping atoms into the unit cell..."):
                                     try:
                                         wrapped_structure = pmg_to_visualize.copy()
+
+                                        shift_vec = np.zeros(3)
+                                        if use_wrap_tol and wrap_tol_value > 0.0:
+                                            # Compute a SINGLE rigid shift (structure-preserving):
+                                            # per axis, take atoms within the tolerance of a cell
+                                            # face and use their average signed offset from that
+                                            # face. Shifting all atoms by -offset aligns them onto
+                                            # the face. This is a uniform translation, so all
+                                            # interatomic distances/angles are unchanged.
+                                            frac_all = np.array(wrapped_structure.frac_coords, dtype=float)
+                                            deviation = frac_all - np.round(frac_all)  # in (-0.5, 0.5]
+                                            for axis in range(3):
+                                                dev_axis = deviation[:, axis]
+                                                near = np.abs(dev_axis) < wrap_tol_value
+                                                if np.any(near):
+                                                    shift_vec[axis] = -np.mean(dev_axis[near])
+
+                                            if np.any(shift_vec != 0.0):
+                                                wrapped_structure.translate_sites(
+                                                    list(range(len(wrapped_structure))),
+                                                    shift_vec,
+                                                    frac_coords=True,
+                                                    to_unit_cell=False
+                                                )
+
                                         wrapped_structure.translate_sites(
                                             list(range(len(wrapped_structure))),
                                             [0.0, 0.0, 0.0],
@@ -4515,7 +4565,19 @@ if st.session_state.uploaded_files:
                                             st.session_state.represented_structure = wrapped_structure.copy()
                                         st.session_state.helpful = True
 
-                                        st.success("✅ Atoms wrapped back into the unit cell.")
+                                        if use_wrap_tol and wrap_tol_value > 0.0 and np.any(shift_vec != 0.0):
+                                            st.success(
+                                                "✅ Atoms wrapped into the unit cell after a rigid shift of "
+                                                f"({shift_vec[0]:+.4f}, {shift_vec[1]:+.4f}, {shift_vec[2]:+.4f}) "
+                                                "in fractional coords. The structure is unchanged under PBC."
+                                            )
+                                        elif use_wrap_tol and wrap_tol_value > 0.0:
+                                            st.success(
+                                                "✅ Atoms wrapped into the unit cell. No atoms were within "
+                                                "tolerance of a cell face, so no shift was applied."
+                                            )
+                                        else:
+                                            st.success("✅ Atoms wrapped back into the unit cell.")
                                         st.rerun()
 
                                     except Exception as e:
