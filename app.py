@@ -271,9 +271,9 @@ st.markdown(
         font-weight: 600;
     ">
         <span style="color:#2563eb; font-weight:800;">Release:</span>
-        v0.4.2 &nbsp; | &nbsp;
+        v0.4.3 &nbsp; | &nbsp;
         <span style="color:#2563eb; font-weight:800;">Updated:</span>
-        June 27, 2026
+        September 17, 2026
     </div>
     """,
     unsafe_allow_html=True
@@ -3204,7 +3204,8 @@ if st.session_state.uploaded_files:
                         # True when the planned total would exceed the online cap (see below).
                         batch_over_limit = False
 
-                        if operation_mode in ["Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]:
+                        if operation_mode in ["Create Substitution Cluster", "Substitute Atoms", "Create Vacancies",
+                                                   "Insert Interstitials (Fast Grid method)"]:
                             use_range_mode = st.checkbox(
                                 "Generate range of defect counts",
                                 value=False,
@@ -3249,6 +3250,107 @@ if st.session_state.uploaded_files:
                                         range(min_substitutions, max_substitutions + 1, step_substitutions))
                                     range_label = "substitutions"
                                     range_mode = "count"
+
+                                elif operation_mode == "Insert Interstitials (Fast Grid method)":
+                                    st.markdown("**Interstitial Range:**")
+
+                                    n_host_ints = len(st.session_state.current_structure_before_defects)
+                                    int_range_unit = st.radio(
+                                        "Range unit", ["Number of atoms", "Percentage (at. %)"],
+                                        key="int_range_unit_fast", horizontal=True,
+                                        help=f"at. % of the inserted {int_el_fast} = inserted atoms / (host atoms + "
+                                             f"inserted atoms) × 100, with {n_host_ints} host atoms. The number of "
+                                             f"atoms is rounded to the nearest integer, so the actual at. % can "
+                                             f"differ slightly from the target."
+                                    )
+
+                                    if int_range_unit == "Number of atoms":
+                                        min_interstitials = st.number_input(
+                                            "Min interstitials",
+                                            min_value=1,
+                                            value=1,
+                                            step=1,
+                                            key="min_ints_fast"
+                                        )
+
+                                        max_interstitials = st.number_input(
+                                            "Max interstitials",
+                                            min_value=min_interstitials,
+                                            value=max(min_interstitials, 10),
+                                            step=1,
+                                            key="max_ints_fast"
+                                        )
+
+                                        step_interstitials = st.number_input(
+                                            "Step size",
+                                            min_value=1,
+                                            max_value=max(1, max_interstitials - min_interstitials),
+                                            value=1,
+                                            step=1,
+                                            key="step_ints_fast"
+                                        )
+
+                                        defect_range = list(
+                                            range(min_interstitials, max_interstitials + 1, step_interstitials))
+                                        int_targets = [None] * len(defect_range)
+                                    else:
+                                        min_int_perc = st.number_input("Min at. %", 0.01, 99.0, 1.0, 0.5,
+                                                                       format="%.2f", key="min_ints_perc_fast")
+                                        max_int_perc = st.number_input("Max at. %", min_int_perc, 99.0,
+                                                                       max(min_int_perc, 10.0), 0.5,
+                                                                       format="%.2f", key="max_ints_perc_fast")
+                                        step_int_perc = st.number_input("Step at. %", 0.01,
+                                                                        max(0.01, max_int_perc - min_int_perc),
+                                                                        min(1.0, max(0.01, max_int_perc - min_int_perc)),
+                                                                        0.1, format="%.2f", key="step_ints_perc_fast")
+                                        target_percs = [round(float(x), 2) for x in
+                                                        np.arange(min_int_perc, max_int_perc + step_int_perc / 2,
+                                                                  step_int_perc)]
+                                        # n / (N + n) = p / 100  =>  n = p * N / (100 - p)
+                                        defect_range, int_targets = [], []
+                                        dropped_percs = []
+                                        for _p in target_percs:
+                                            _n = int(round(_p * n_host_ints / (100.0 - _p)))
+                                            if _n < 1 or _n in defect_range:
+                                                dropped_percs.append(_p)
+                                                continue
+                                            defect_range.append(_n)
+                                            int_targets.append(_p)
+                                        if dropped_percs:
+                                            st.warning(
+                                                f"{len(dropped_percs)} target value(s) {dropped_percs} round to 0 atoms "
+                                                f"or to the same number of atoms as a previous value for this "
+                                                f"{n_host_ints}-atom structure and were skipped. Use a larger step or "
+                                                f"a bigger supercell for finer resolution.")
+
+                                    int_preview_rows = []
+                                    for _n, _p in zip(defect_range, int_targets):
+                                        _row = {}
+                                        if _p is not None:
+                                            _row["Target at. %"] = f"{_p:.2f}"
+                                        _row[f"Inserted {int_el_fast} atoms"] = _n
+                                        _row["Total atoms"] = n_host_ints + _n
+                                        _row[f"Actual at. % of inserted {int_el_fast}"] = \
+                                            f"{_n / (n_host_ints + _n) * 100:.2f}"
+                                        int_preview_rows.append(_row)
+                                    if int_preview_rows:
+                                        st.markdown(f"**Preview of inserted {int_el_fast} concentration** "
+                                                    f"(host: {n_host_ints} atoms):")
+                                        st.dataframe(pd.DataFrame(int_preview_rows), hide_index=True,
+                                                     height=min(300, 38 + 35 * len(int_preview_rows)))
+                                    else:
+                                        st.warning("The selected range gives no interstitial counts ≥ 1.")
+                                        use_range_mode = False
+                                        defect_range = None
+                                    int_folder_by_count = {}
+                                    if defect_range:
+                                        for _n in defect_range:
+                                            _act = _n / (n_host_ints + _n) * 100
+                                            int_folder_by_count[_n] = (
+                                                f"{_n}{int_el_fast}_ints" if int_range_unit == "Number of atoms"
+                                                else f"{int_el_fast}_{_act:.2f}atperc_{_n}ints")
+                                    range_label = "interstitials"
+                                    range_mode = "count" if int_range_unit == "Number of atoms" else "percentage"
 
                                 elif operation_mode == "Substitute Atoms":
                                     st.markdown("**Substitution Range:**")
@@ -3461,7 +3563,8 @@ if st.session_state.uploaded_files:
                                      type='primary'):
                             if st.session_state.current_structure_before_defects:
                                 _range_active = st.session_state.get('use_range_mode', False) and operation_mode in [
-                                    "Create Substitution Cluster", "Substitute Atoms", "Create Vacancies"]
+                                    "Create Substitution Cluster", "Substitute Atoms", "Create Vacancies",
+                                                   "Insert Interstitials (Fast Grid method)"]
 
                                 if _range_active and batch_over_limit:
                                     st.error(
@@ -3605,6 +3708,16 @@ if st.session_state.uploaded_files:
                                                             )
                                                         else:
                                                             modified_struct = base_struct
+
+                                                elif operation_mode == "Insert Interstitials (Fast Grid method)":
+                                                    num_ints = int(defect_value)
+                                                    int_folder = int_folder_by_count[num_ints]
+                                                    config_name = f"{int_folder}/config_{int_folder}_rep{rep + 1:02d}_seed{seed}"
+                                                    base_struct = st.session_state.current_structure_before_defects.copy()
+                                                    modified_struct = insert_interstitials_ase_fast(
+                                                        base_struct, int_el_fast, num_ints, int_min_dist_fast,
+                                                        int_grid_spacing, int_mode_fast, int_min_int_dist, None, seed
+                                                    )
 
                                                 elif operation_mode == "Substitute Atoms":
                                                     base_struct = st.session_state.current_structure_before_defects.copy()
