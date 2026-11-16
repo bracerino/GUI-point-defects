@@ -272,9 +272,9 @@ st.markdown(
         font-weight: 600;
     ">
         <span style="color:#2563eb; font-weight:800;">Release:</span>
-        v0.4.4 &nbsp; | &nbsp;
+        v0.5.0 &nbsp; | &nbsp;
         <span style="color:#2563eb; font-weight:800;">Updated:</span>
-        October 17, 2026
+        November 16, 2026
     </div>
     """,
     unsafe_allow_html=True
@@ -4974,3 +4974,75 @@ This project uses several open-source tools and datasets. We gratefully acknowle
  **[ASE (Atomic Simulation Environment)](https://gitlab.com/ase/ase)** Licensed under the [GNU Lesser General Public License (LGPL)](https://gitlab.com/ase/ase/-/blob/master/COPYING.LESSER). **[Py3DMol](https://github.com/avirshup/py3dmol/tree/master)** Licensed under the [BSD-style License](https://github.com/avirshup/py3dmol/blob/master/LICENSE.txt). **[Materials Project](https://next-gen.materialsproject.org/)** Data from the Materials Project is made available under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). **[AFLOW](http://aflow.org)** Licensed under the [GNU General Public License (GPL)](https://www.gnu.org/licenses/gpl-3.0.html)
  **[Crystallography Open Database (COD)](https://www.crystallography.net/cod/)** under the CC0 license.
 """)
+
+
+# ---------------------------------------------------------------------------
+# Supporter logos and the XRDlicious publication at the bottom of the sidebar
+# (the same block as in XRDlicious and the XRD file converter).
+# ---------------------------------------------------------------------------
+import base64 as _b64
+from pathlib import Path as _Path
+
+_IMAGES_DIR = _Path(__file__).resolve().parent / "images"
+
+# (name, website, logo file, logo height in px)
+SUPPORTERS = [
+    ("FZU – Institute of Physics of the Czech Academy of Sciences",
+     "https://www.fzu.cz/en", "fzu_logo.svg", 34),
+    ("IMPLANT group", "https://implant.fs.cvut.cz/", "implant_logo.png", 44),
+]
+ARTICLE_URL = "https://doi.org/10.1107/S1600576725005370"
+ARTICLE_TITLE = ("Lebeda et al. (2025). XRDlicious: an interactive web-based platform "
+                 "for online calculation of diffraction patterns and radial distribution "
+                 "functions from crystal structures. J. Appl. Cryst. 58")
+
+
+def _image_data_uri(fname):
+    path = _IMAGES_DIR / fname
+    if not path.exists():
+        return None
+    mime = {".svg": "image/svg+xml", ".webp": "image/webp"}.get(path.suffix.lower(), "image/png")
+    return f"data:{mime};base64,{_b64.b64encode(path.read_bytes()).decode()}"
+
+
+def _journal_html():
+    mark = _image_data_uri("iucr_journals_logo_spaces.webp")
+    mark_html = (f'<img src="{mark}" alt="IUCr" style="height:30px;width:30px;flex:none;">'
+                 if mark else "")
+    # without the mark, a coloured bar on the left takes its place
+    bar = "" if mark else "border-left:4px solid #1f4e8c;padding-left:8px;"
+    badge = (
+        '<span style="display:inline-flex;align-items:center;gap:8px;">'
+        + mark_html +
+        f'<span style="display:inline-block;{bar}padding-top:2px;padding-bottom:2px;'
+        'line-height:1.05;font-family:Georgia,\'Times New Roman\',serif;color:#1f4e8c;">'
+        '<span style="font-size:0.78em;font-style:italic;">Journal of</span><br>'
+        '<span style="font-size:0.95em;font-weight:700;white-space:nowrap;">'
+        'Applied Crystallography</span></span></span>')
+    return (
+        '<div style="font-size:0.85em;opacity:0.8;margin:14px 0 6px 0;">Published in</div>'
+        f'<a href="{ARTICLE_URL}" target="_blank" title="{ARTICLE_TITLE}" '
+        'style="text-decoration:none;">' + badge + '</a>')
+
+
+def render_supporters():
+    logos = []
+    for name, url, fname, height in SUPPORTERS:
+        uri = _image_data_uri(fname)
+        if uri:
+            logos.append(f'<a href="{url}" target="_blank" title="{name}">'
+                         f'<img src="{uri}" alt="{name}" style="height:{height}px;width:auto;"></a>')
+    # Keyed so Streamlit tracks the block by key, not by position: otherwise a
+    # rerun that adds sidebar content above it briefly shows two copies.
+    box = st.sidebar.container(key="sidebar_supporters")
+    box.markdown("---")
+    box.markdown(
+        '<div style="font-size:0.85em;opacity:0.8;margin-bottom:6px;">'
+        'Supported by <b>FZU</b> and the <b>IMPLANT group</b></div>'
+        '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">'
+        + "".join(logos) + '</div>' + _journal_html(),
+        unsafe_allow_html=True,
+    )
+
+
+render_supporters()
